@@ -5,3 +5,4 @@ shots/
 build/
 dist/
 *.xcodeproj/xcuserdata/
+capture_*.swift

@@ -14,6 +14,13 @@ struct AgentUsageBarApp: App {
             fails.forEach { print("FAIL " + $0) }
             exit(1)
         }
+        if a.contains("--check-icons") {
+            for id in ["claude", "agy"] {
+                let r = ProviderIcon.resolve(id)
+                print("\(id): \(r.source) size=\(Int(r.image?.size.width ?? 0))x\(Int(r.image?.size.height ?? 0))")
+            }
+            exit(0)
+        }
         if let i = a.firstIndex(of: "--snapshot"), i + 1 < a.count {
             let dir = a[i + 1]
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
@@ -67,19 +74,22 @@ struct MenuLabel: View {
 enum ProviderIcon {
     static let symbols = ["claude": "sparkles", "agy": "atom"]
 
-    static func nsImage(_ id: String) -> NSImage? {
-        guard !id.isEmpty, !id.contains("/") else { return nil }
+    static func nsImage(_ id: String) -> NSImage? { resolve(id).image }
+
+    /// Which source supplied the icon ("override", "bundled" or "symbol") and the loaded image.
+    static func resolve(_ id: String) -> (source: String, image: NSImage?) {
+        guard !id.isEmpty, !id.contains("/") else { return ("symbol", nil) }
         let name = "\(id)-template.svg"
         let user = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config/agent-usage-bar/icons/\(name)")
-        var candidates = [user]
+        var candidates = [("override", user)]
         if let res = Bundle.main.resourceURL {
-            candidates.append(res.appendingPathComponent("Icons/\(name)"))
+            candidates.append(("bundled", res.appendingPathComponent("Icons/\(name)")))
         }
-        for url in candidates where FileManager.default.fileExists(atPath: url.path) {
-            if let img = NSImage(contentsOf: url) { img.isTemplate = true; return img }
+        for (source, url) in candidates where FileManager.default.fileExists(atPath: url.path) {
+            if let img = NSImage(contentsOf: url), img.size.width > 0 { img.isTemplate = true; return (source, img) }
         }
-        return nil
+        return ("symbol", nil)
     }
     @ViewBuilder
     static func image(for id: String, fallback: String, tinted: Bool = false) -> some View {
