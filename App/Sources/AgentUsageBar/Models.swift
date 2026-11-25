@@ -121,7 +121,7 @@ struct Provider: Decodable, Identifiable {
             ("claude-opus-5", "Opus 5"), ("claude-opus-5-5", "Opus 5.5"),
             ("claude-sonnet-5", "Sonnet 5"), ("claude-sonnet-5-5-20260101", "Sonnet 5.5"),
             ("claude-haiku-4-5-20251001", "Haiku 4.5"),
-            ("gemini-pro-orchestrator-neon", "Gemini Pro Orchestrator Neon"),
+            ("gemini-2.5-pro-preview", "Gemini 2.5 Pro Preview"),
             ("gemini-3.8-flash-medium", "Gemini 3.8 Flash Medium"),
             ("gemini-4-hydrogen-tiered-high", "Gemini 4 Hydrogen Tiered High"),
         ]
