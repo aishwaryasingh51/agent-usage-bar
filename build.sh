@@ -7,10 +7,11 @@ cd "$ROOT/App"
 swift build -c release --arch arm64
 BIN="$(swift build -c release --arch arm64 --show-bin-path)/AgentUsageBar"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/collectors"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/collectors" "$APP/Contents/Resources/Icons"
 cp "$BIN" "$APP/Contents/MacOS/AgentUsageBar"
 cp "$ROOT"/collectors/agent-usage-* "$APP/Contents/Resources/collectors/"
 chmod +x "$APP"/Contents/Resources/collectors/*
+cp "$ROOT"/App/Resources/Icons/*-template.svg "$APP/Contents/Resources/Icons/"
 cp -R "$ROOT/docs/demo" "$APP/Contents/Resources/demo"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

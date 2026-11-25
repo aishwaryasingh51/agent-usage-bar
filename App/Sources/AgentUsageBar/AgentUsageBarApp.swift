@@ -62,19 +62,24 @@ struct MenuLabel: View {
     }
 }
 
-/// SF Symbol per provider by default. A user can override any provider with
-/// ~/.config/agent-usage-bar/icons/<id>-template.svg (loaded as a template image).
+/// Icon lookup: user override ~/.config/agent-usage-bar/icons/<id>-template.svg,
+/// then the bundled <id>-template.svg, then an SF Symbol. SVGs load as template images.
 enum ProviderIcon {
     static let symbols = ["claude": "sparkles", "agy": "atom"]
 
     static func nsImage(_ id: String) -> NSImage? {
         guard !id.isEmpty, !id.contains("/") else { return nil }
-        let url = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".config/agent-usage-bar/icons/\(id)-template.svg")
-        guard FileManager.default.fileExists(atPath: url.path),
-              let img = NSImage(contentsOf: url) else { return nil }
-        img.isTemplate = true
-        return img
+        let name = "\(id)-template.svg"
+        let user = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".config/agent-usage-bar/icons/\(name)")
+        var candidates = [user]
+        if let res = Bundle.main.resourceURL {
+            candidates.append(res.appendingPathComponent("Icons/\(name)"))
+        }
+        for url in candidates where FileManager.default.fileExists(atPath: url.path) {
+            if let img = NSImage(contentsOf: url) { img.isTemplate = true; return img }
+        }
+        return nil
     }
     @ViewBuilder
     static func image(for id: String, fallback: String, tinted: Bool = false) -> some View {

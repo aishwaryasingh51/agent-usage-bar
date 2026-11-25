@@ -36,12 +36,17 @@ Click the gauge in the menu bar for details. The app refreshes every 15 minutes
 "Launch at login" is on by default; toggle it in the popover.
 
 ## Icons
-Each agent gets an SF Symbol by default. To use your own, put a single-colour SVG at
+Claude and Antigravity logos ship as defaults (see Trademarks below). Lookup order:
 
-    ~/.config/agent-usage-bar/icons/<id>-template.svg
+1. `~/.config/agent-usage-bar/icons/<id>-template.svg` (your override)
+2. the bundled `<id>-template.svg`
+3. an SF Symbol fallback
 
-where `<id>` is `claude` or `agy` (the file name of the usage JSON). It is loaded
-as a template image, so it follows the menu bar colours. Restart the app after adding one.
+`<id>` is `claude` or `agy` (the file name of the usage JSON). All are loaded as
+template images, so they follow the menu bar colours. Restart the app after adding an override.
+
+## Trademarks
+Claude and the Claude logo are trademarks of Anthropic, PBC. Antigravity and its logo are trademarks of Google LLC. They are used only to identify the services this app reads usage from. This project is not affiliated with or endorsed by either company, and the logo files are not covered by the MIT licence.
 
 ## Settings (environment variables)
 - `AGENT_USAGE_DIR`: where usage JSON files are written and read. Default:
