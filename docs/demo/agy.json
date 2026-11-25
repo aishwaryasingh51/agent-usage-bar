@@ -1,0 +1,81 @@
+{
+  "id": "agy",
+  "name": "Antigravity",
+  "ready": true,
+  "tierLabel": "pro",
+  "usageStatusText": "",
+  "authHelpText": "",
+  "limits": [
+    {
+      "label": "Session (5-hour)",
+      "title": "Session",
+      "percent": 0.12,
+      "resetsAt": "2099-01-01T00:00:00Z"
+    },
+    {
+      "label": "Weekly (7-day)",
+      "title": "Weekly",
+      "percent": 0.71,
+      "resetsAt": "2099-01-01T00:00:00Z"
+    }
+  ],
+  "limitsStale": false,
+  "retryAdvised": false,
+  "updatedAt": "2026-11-25T12:00:00Z",
+  "hasLocalStats": true,
+  "hasPromptStats": true,
+  "todayPrompts": 22,
+  "todaySessions": 4,
+  "todayTotalTokens": 6100000,
+  "todayTokensByModel": {
+    "example-pro": 4200000,
+    "example-flash": 1900000
+  },
+  "recentDays": [
+    {
+      "date": "2026-11-19",
+      "messageCount": 0
+    },
+    {
+      "date": "2026-11-20",
+      "messageCount": 900000
+    },
+    {
+      "date": "2026-11-21",
+      "messageCount": 2400000
+    },
+    {
+      "date": "2026-11-22",
+      "messageCount": 0
+    },
+    {
+      "date": "2026-11-23",
+      "messageCount": 3100000
+    },
+    {
+      "date": "2026-11-24",
+      "messageCount": 5200000
+    },
+    {
+      "date": "2026-11-25",
+      "messageCount": 6100000
+    }
+  ],
+  "totalPrompts": 140,
+  "totalSessions": 26,
+  "activeDays": 14,
+  "modelUsage": {
+    "example-pro": {
+      "inputTokens": 800000,
+      "outputTokens": 120000,
+      "cacheReadInputTokens": 9000000,
+      "cacheCreationInputTokens": 0
+    },
+    "example-flash": {
+      "inputTokens": 400000,
+      "outputTokens": 60000,
+      "cacheReadInputTokens": 3000000,
+      "cacheCreationInputTokens": 0
+    }
+  }
+}

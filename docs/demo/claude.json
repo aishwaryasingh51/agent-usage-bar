@@ -1,0 +1,88 @@
+{
+  "id": "claude",
+  "name": "Claude",
+  "ready": true,
+  "tierLabel": "max",
+  "usageStatusText": "",
+  "authHelpText": "",
+  "limits": [
+    {
+      "label": "Session (5-hour)",
+      "title": "Session",
+      "percent": 0.34,
+      "resetsAt": "2099-01-01T00:00:00Z"
+    },
+    {
+      "label": "Weekly (7-day)",
+      "title": "Weekly",
+      "percent": 0.58,
+      "resetsAt": "2099-01-01T00:00:00Z"
+    }
+  ],
+  "limitsStale": false,
+  "retryAdvised": false,
+  "updatedAt": "2026-11-25T12:00:00Z",
+  "hasLocalStats": true,
+  "hasPromptStats": true,
+  "todayPrompts": 48,
+  "todaySessions": 9,
+  "todayTotalTokens": 21400000,
+  "todayTokensByModel": {
+    "example-large": 16800000,
+    "example-medium": 3900000,
+    "example-small": 700000
+  },
+  "recentDays": [
+    {
+      "date": "2026-11-19",
+      "messageCount": 3200000
+    },
+    {
+      "date": "2026-11-20",
+      "messageCount": 8100000
+    },
+    {
+      "date": "2026-11-21",
+      "messageCount": 0
+    },
+    {
+      "date": "2026-11-22",
+      "messageCount": 1500000
+    },
+    {
+      "date": "2026-11-23",
+      "messageCount": 12400000
+    },
+    {
+      "date": "2026-11-24",
+      "messageCount": 18900000
+    },
+    {
+      "date": "2026-11-25",
+      "messageCount": 21400000
+    }
+  ],
+  "totalPrompts": 512,
+  "totalSessions": 71,
+  "activeDays": 38,
+  "modelUsage": {
+    "example-large": {
+      "inputTokens": 2100000,
+      "outputTokens": 640000,
+      "cacheReadInputTokens": 61000000,
+      "cacheCreationInputTokens": 3800000
+    },
+    "example-medium": {
+      "inputTokens": 900000,
+      "outputTokens": 210000,
+      "cacheReadInputTokens": 12000000,
+      "cacheCreationInputTokens": 900000
+    },
+    "example-small": {
+      "inputTokens": 150000,
+      "outputTokens": 40000,
+      "cacheReadInputTokens": 1500000,
+      "cacheCreationInputTokens": 120000
+    }
+  }
+}

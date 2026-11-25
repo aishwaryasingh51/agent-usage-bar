@@ -1,0 +1,7 @@
+.build/
+*.app
+shots/
+.DS_Store
+build/
+dist/
+*.xcodeproj/xcuserdata/

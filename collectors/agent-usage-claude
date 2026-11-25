@@ -1,0 +1,229 @@
+#!/usr/bin/env python3
+"""macOS collector: Claude Code usage -> $AGENT_USAGE_DIR/claude.json (default ~/.local/state/agent-usage-bar/usage)
+
+Record schema derived from the Omarchy agents plugin. The OAuth token is read
+at runtime from the login Keychain ("Claude Code-credentials") or
+~/.claude/.credentials.json, used for one HTTPS call, and never printed,
+logged or stored. Flags: --write (default; writes the file), --force and
+--limits-only (accepted, same behaviour: always fresh), --print (stdout only).
+"""
+import json, os, subprocess, sys, time, urllib.request, urllib.error
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+HOME = Path.home()
+STATE = Path(os.environ.get("XDG_STATE_HOME") or HOME / ".local" / "state")
+USAGE_DIR = Path(os.environ.get("AGENT_USAGE_DIR") or STATE / "agent-usage-bar" / "usage")
+CACHE = Path(os.environ.get("XDG_CACHE_HOME") or HOME / ".cache") / "agent-usage-bar" / "claude-scan.json"
+PROJECTS = Path(os.environ.get("CLAUDE_CONFIG_DIR") or HOME / ".claude") / "projects"
+API = "https://api.anthropic.com/api/oauth/usage"
+
+
+def read_credentials():
+    raw = None
+    try:
+        raw = subprocess.run(["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
+                             capture_output=True, text=True, timeout=10).stdout.strip() or None
+    except Exception:
+        pass
+    if not raw:
+        try:
+            raw = (HOME / ".claude" / ".credentials.json").read_text()
+        except OSError:
+            return None
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return None
+    oauth = data.get("claudeAiOauth") if isinstance(data, dict) else None
+    return oauth if isinstance(oauth, dict) else None
+
+
+def fetch_usage(token):
+    req = urllib.request.Request(API, headers={
+        "Authorization": "Bearer " + token, "anthropic-beta": "oauth-2025-04-20",
+        "Accept": "application/json", "User-Agent": "agent-usage-bar"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.load(r)
+
+
+def iso(value):
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def window(label, title, entry):
+    if not isinstance(entry, dict) or entry.get("utilization") is None:
+        return None
+    try:
+        pct = max(0.0, float(entry["utilization"]) / 100.0)
+    except (TypeError, ValueError):
+        return None
+    reset = iso(entry.get("resets_at")) if entry.get("resets_at") else None
+    return {"label": label, "title": title, "percent": round(pct, 4),
+            "resetsAt": reset.astimezone(timezone.utc).isoformat().replace("+00:00", "Z") if reset else ""}
+
+
+def num(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0 else 0
+
+
+def scan_file(path):
+    """Per-file summary: {day: {model: [in,out,cr,cc]}}, prompts-by-day, session ids."""
+    tokens, prompts, seen = {}, {}, set()
+    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        if '"usage"' not in line and '"type":"user"' not in line:
+            continue
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        ts = iso(e.get("timestamp"))
+        if not ts:
+            continue
+        day = ts.astimezone().date().isoformat()
+        if e.get("type") == "assistant":
+            m = e.get("message") or {}
+            u = m.get("usage")
+            if not isinstance(u, dict):
+                continue
+            key = (m.get("id"), e.get("requestId"))
+            if key != (None, None):
+                if key in seen:
+                    continue
+                seen.add(key)
+            model = m.get("model") or "unknown"
+            if model.startswith("<"):
+                continue
+            b = tokens.setdefault(day, {}).setdefault(model, [0, 0, 0, 0])
+            b[0] += num(u.get("input_tokens")); b[1] += num(u.get("output_tokens"))
+            b[2] += num(u.get("cache_read_input_tokens")); b[3] += num(u.get("cache_creation_input_tokens"))
+        elif e.get("type") == "user" and not e.get("isSidechain") and not e.get("isMeta"):
+            c = (e.get("message") or {}).get("content")
+            if isinstance(c, str) or (isinstance(c, list) and any(isinstance(x, dict) and x.get("type") == "text" for x in c)):
+                prompts[day] = prompts.get(day, 0) + 1
+    return {"tokens": tokens, "prompts": prompts}
+
+
+def local_stats():
+    try:
+        cache = json.loads(CACHE.read_text())
+    except Exception:
+        cache = {}
+    files, fresh = {}, {}
+    for p in PROJECTS.rglob("*.jsonl"):
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        sig = [st.st_mtime_ns, st.st_size]
+        hit = cache.get(str(p))
+        if hit and hit["sig"] == sig:
+            fresh[str(p)] = hit
+        else:
+            try:
+                fresh[str(p)] = {"sig": sig, **scan_file(p)}
+            except OSError:
+                continue
+    try:
+        CACHE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = CACHE.with_suffix(f".{os.getpid()}")
+        tmp.write_text(json.dumps(fresh)); os.replace(tmp, CACHE)
+    except OSError:
+        pass
+
+    today = datetime.now().date()
+    today_s = today.isoformat()
+    by_day, prompts_by_day, model_usage, today_models = {}, {}, {}, {}
+    sessions_total, sessions_today = len(fresh), 0
+    for p, f in fresh.items():
+        if today_s in f["prompts"] or today_s in f["tokens"]:
+            sessions_today += 1
+        for d, n in f["prompts"].items():
+            prompts_by_day[d] = prompts_by_day.get(d, 0) + n
+        for d, models in f["tokens"].items():
+            for model, (i, o, cr, cc) in models.items():
+                by_day[d] = by_day.get(d, 0) + i + o + cr + cc
+                mu = model_usage.setdefault(model, {"inputTokens": 0, "outputTokens": 0,
+                                                    "cacheReadInputTokens": 0, "cacheCreationInputTokens": 0})
+                mu["inputTokens"] += i; mu["outputTokens"] += o
+                mu["cacheReadInputTokens"] += cr; mu["cacheCreationInputTokens"] += cc
+                if d == today_s:
+                    today_models[model] = today_models.get(model, 0) + i + o + cr + cc
+    active = set(by_day) | set(prompts_by_day)
+    recent = [{"date": (today - timedelta(days=n)).isoformat(),
+               "messageCount": by_day.get((today - timedelta(days=n)).isoformat(), 0)} for n in range(6, -1, -1)]
+    return {
+        "hasLocalStats": bool(active),
+        "hasPromptStats": True,
+        "todayPrompts": prompts_by_day.get(today_s, 0),
+        "todaySessions": sessions_today,
+        "todayTotalTokens": by_day.get(today_s, 0),
+        "todayTokensByModel": today_models,
+        "recentDays": recent,
+        "totalPrompts": sum(prompts_by_day.values()),
+        "totalSessions": sessions_total,
+        "activeDays": len(active),
+        "activeDates": sorted(active),
+        "modelUsage": model_usage,
+    }
+
+
+def main():
+    oauth = read_credentials()
+    limits, tier, status, auth_help, fetched = [], "", "", "", 0
+    retry = False
+    if not oauth or not oauth.get("accessToken"):
+        status, auth_help = "Not signed in", "Run `claude` and sign in to see your usage limits."
+    else:
+        tier = str(oauth.get("subscriptionType") or "")
+        try:
+            data = fetch_usage(str(oauth["accessToken"]))
+            fetched = int(time.time() * 1000)
+            for key, label, title in (("five_hour", "Session (5-hour)", "Session"),
+                                      ("seven_day", "Weekly (7-day)", "Weekly"),
+                                      ("seven_day_opus", "Weekly Opus (7-day)", "Opus"),
+                                      ("seven_day_sonnet", "Weekly Sonnet (7-day)", "Sonnet")):
+                w = window(label, title, data.get(key))
+                if w:
+                    limits.append(w)
+        except urllib.error.HTTPError as ex:
+            if ex.code in (401, 403):
+                status, auth_help = "Sign-in expired", "Open `claude` once to renew your sign-in, then refresh."
+            else:
+                status, auth_help = "Limits unavailable", f"Anthropic returned HTTP {ex.code}; will retry."
+                retry = True
+        except Exception:
+            status, auth_help = "Limits unavailable", "Could not reach Anthropic; will retry."
+            retry = True
+
+    # Keep the last good limits (marked stale) when a fetch fails.
+    out_path = USAGE_DIR / "claude.json"
+    stale = False
+    if not limits:
+        try:
+            old = json.loads(out_path.read_text())
+            if old.get("limits"):
+                limits, stale = old["limits"], True
+                fetched = old.get("limitsFetchedAt", 0)
+        except Exception:
+            pass
+
+    record = {"id": "claude", "name": "Claude", "ready": True,
+              "tierLabel": tier, "usageStatusText": status, "authHelpText": auth_help,
+              "limits": limits, "limitsStale": stale, "limitsFetchedAt": fetched, "retryAdvised": retry,
+              "updatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")}
+    record.update(local_stats())
+    text = json.dumps(record, separators=(",", ":"), allow_nan=False) + "\n"
+    if "--print" in sys.argv:
+        sys.stdout.write(text); return
+    USAGE_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = USAGE_DIR / f".claude.{os.getpid()}"
+    tmp.write_text(text)
+    os.replace(tmp, out_path)
+
+
+if __name__ == "__main__":
+    main()
