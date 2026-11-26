@@ -44,7 +44,7 @@ struct PanelRoot: View {
 
 /// NSStatusItem + NSPopover: the popover tracks the SwiftUI ideal size both ways (grow and shrink).
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let store = Store()
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
@@ -52,6 +52,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var cancellables = Set<AnyCancellable>()
     private var appearanceObs: NSKeyValueObservation?
     private var lastItems: [LabelItem]?
+    private var globalMonitor: Any?
+    private var localMonitor: Any?
     private let logging = CommandLine.arguments.contains("--log-window")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -61,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         host.sizingOptions = [.preferredContentSize]
         popover = NSPopover()
         popover.behavior = .transient
+        popover.delegate = self
         popover.contentViewController = host
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -86,6 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { MainActor.assumeIsolated {
                 self.show()
                 if self.logging { self.cycleTabs() }
+                if CommandLine.arguments.contains("--simulate-outside-click") { self.simulateOutsideClick() }
             } }
         }
     }
@@ -103,9 +107,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func show() {
         guard let b = statusItem.button, !popover.isShown else { return }
-        popover.show(relativeTo: b.bounds, of: b, preferredEdge: .minY)
+        // An accessory (LSUIElement) app only gets outside clicks while it is active.
         NSApp.activate(ignoringOtherApps: true)
+        popover.show(relativeTo: b.bounds, of: b, preferredEdge: .minY)
+        popover.contentViewController?.view.window?.makeKey()
+        installMonitors()
         logSizes("open")
+    }
+
+    /// Clicks in other apps never reach us as normal events, so watch globally; Esc is local.
+    /// Clicks on our own status item are not delivered to the global monitor, so no double-toggle.
+    private func installMonitors() {
+        removeMonitors()
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.popover.performClose(nil) } }
+        }
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] e in
+            if e.keyCode == 53, let self, self.popover.isShown {
+                self.popover.performClose(nil)
+                return nil
+            }
+            return e
+        }
+    }
+
+    private func removeMonitors() {
+        if let m = globalMonitor { NSEvent.removeMonitor(m); globalMonitor = nil }
+        if let m = localMonitor { NSEvent.removeMonitor(m); localMonitor = nil }
+    }
+
+    func popoverDidClose(_ notification: Notification) { removeMonitors() }
+
+    /// Debug (--simulate-outside-click): synthetic mouse-down far from the popover, then log whether it closed.
+    private func simulateOutsideClick() {
+        let frame = popover.contentViewController?.view.window?.frame ?? .zero
+        let screen = NSScreen.main?.frame ?? .zero
+        // CGEvent uses top-left origin; pick the screen's lower-left area, well away from the popover.
+        let pt = CGPoint(x: screen.minX + 80, y: screen.maxY - 80)
+        let cg = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: pt, mouseButton: .left)
+        cg?.post(tap: .cghidEventTap)
+        let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: pt, mouseButton: .left)
+        up?.post(tap: .cghidEventTap)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { MainActor.assumeIsolated {
+            print("popover-closed=\(self.popover.isShown ? "no" : "yes") (click at \(Int(pt.x)),\(Int(pt.y)); popover frame \(frame))")
+            fflush(stdout)
+            exit(0)
+        } }
     }
 
     /// Debug: step through the provider tabs so shrink/grow can be seen in the log.

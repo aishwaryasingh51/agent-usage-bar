@@ -142,10 +142,11 @@ struct Provider: Decodable, Identifiable {
             return got == want ? nil : "\(id): got '\(got)', want '\(want)'"
         }
         fails += sessionSelfTest()
+        fails += demoShiftSelfTest()
         return fails
     }
 
-    static let selfTestCount = 8 + 5
+    static let selfTestCount = 8 + 5 + 3
 
     private static func sessionSelfTest() -> [String] {
         func prov(_ limits: String) -> Provider? {
@@ -163,6 +164,46 @@ struct Provider: Decodable, Identifiable {
             let got = prov(json)?.sessionPercent(now: Date())
             return got == want ? nil : "session \(name): got \(String(describing: got)), want \(String(describing: want))"
         }
+    }
+}
+
+extension Provider {
+    /// Demo mode only: fixtures carry fixed dates, so make them follow today.
+    /// The last recentDays entry becomes today (earlier ones keep their spacing),
+    /// and reset times / updatedAt become relative to now. Real collectors are untouched.
+    mutating func shiftForDemo(now: Date) {
+        let offsets: [TimeInterval] = [2 * 3600 + 13 * 60, 3 * 86400 + 5 * 3600]
+        let iso = ISO8601DateFormatter()
+        limits = limits?.enumerated().map { i, w in
+            var w = w
+            w.resetsAt = iso.string(from: now.addingTimeInterval(offsets[min(i, 1)]))
+            return w
+        }
+        updatedAt = iso.string(from: now)
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.locale = Locale(identifier: "en_US_POSIX")
+        let cal = Calendar.current
+        if let days = recentDays, let last = days.last, let lastDate = f.date(from: last.date) {
+            let delta = cal.dateComponents([.day], from: cal.startOfDay(for: lastDate), to: cal.startOfDay(for: now)).day ?? 0
+            recentDays = days.map { d in
+                var d = d
+                if let dt = f.date(from: d.date), let n = cal.date(byAdding: .day, value: delta, to: dt) { d.date = f.string(from: n) }
+                return d
+            }
+        }
+    }
+
+    static func demoShiftSelfTest() -> [String] {
+        let json = #"{"id":"x","limits":[{"label":"Session (5-hour)","percent":0.3,"resetsAt":"2020-01-01T00:00:00Z"}],"recentDays":[{"date":"2020-01-01","messageCount":1},{"date":"2020-01-02","messageCount":2}]}"#
+        guard var p = try? JSONDecoder().decode(Provider.self, from: Data(json.utf8)) else { return ["demo shift: decode failed"] }
+        let now = Date()
+        p.shiftForDemo(now: now)
+        var fails: [String] = []
+        if p.recentDays?.last?.date != Fmt.todayString() { fails.append("demo shift: last day \(p.recentDays?.last?.date ?? "nil"), want today") }
+        let y = Calendar.current.date(byAdding: .day, value: -1, to: now).map { f -> String in
+            let d = DateFormatter(); d.dateFormat = "yyyy-MM-dd"; return d.string(from: f) }
+        if p.recentDays?.first?.date != y { fails.append("demo shift: first day not yesterday") }
+        if let r = p.limits?.first?.resetDate, r <= now { fails.append("demo shift: reset not in future") } else if p.limits?.first?.resetDate == nil { fails.append("demo shift: reset missing") }
+        return fails
     }
 }
 

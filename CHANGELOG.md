@@ -21,6 +21,7 @@ All notable changes to Agent Usage Bar are documented here. The format follows
 
 ### Fixed
 - The Antigravity check no longer touches the Keychain when `agy` is missing.
+- Clicking outside the popover (or pressing Esc) closes it again.
 
 ## [0.1.0] - 2026-11-25
 

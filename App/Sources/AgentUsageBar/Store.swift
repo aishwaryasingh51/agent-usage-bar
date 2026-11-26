@@ -98,16 +98,7 @@ final class Store: ObservableObject {
         for f in files {
             guard let data = try? Data(contentsOf: f), var p = try? JSONDecoder().decode(Provider.self, from: data) else { continue }
             if p.id.isEmpty { p.id = f.deletingPathExtension().lastPathComponent }
-            if Self.demo {
-                // Demo data has no real reset times: make them relative to now.
-                let offsets: [TimeInterval] = [2 * 3600 + 13 * 60, 3 * 86400 + 5 * 3600]
-                let iso = ISO8601DateFormatter()
-                p.limits = p.limits?.enumerated().map { i, w in
-                    var w = w
-                    w.resetsAt = iso.string(from: Date().addingTimeInterval(offsets[min(i, 1)]))
-                    return w
-                }
-            }
+            if Self.demo { p.shiftForDemo(now: Date()) }
             out.append(p)
         }
         // Claude first, then alphabetical.
