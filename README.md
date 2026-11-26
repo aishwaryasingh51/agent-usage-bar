@@ -25,11 +25,35 @@ The app is ad-hoc signed and built locally, so Gatekeeper does not quarantine it
 Set `INSTALL_DIR` to install somewhere other than `~/Applications`.
 
 ## Updating
-    cd agent-usage-bar
-    git pull && ./build.sh
+The app checks github.com once a day (and when it starts) for a newer release, and
+only tells you: the popover shows "Update available: vX.Y.Z", a "What's new" link and
+an **Update** button. You can turn the daily check off with "Check for updates" in
+the popover. Nothing is installed without your confirmation. The confirmation names
+the version and the short commit of its tag. Pressing Update then downloads that
+release's source into `~/Library/Application Support/AgentUsageBar/src`, **runs its
+build script (`build.sh`) with your permissions on your Mac**, runs the new build's
+`--version` and `--selftest`, and only then restarts into it. If any step fails, the
+current app is left alone and the popover shows the error and the log
+(`~/Library/Logs/AgentUsageBar/update.log`).
 
-Then quit and reopen the app. See [CHANGELOG.md](CHANGELOG.md) for what changed.
-`AgentUsageBar --version` prints the installed version.
+- **Requirements:** git and the Xcode Command Line Tools (`xcode-select --install`).
+  Without them the popover only links to the release.
+- **Trust:** the update runs code from the repository, exactly as running
+  `./build.sh` yourself would. Only update if you trust the repo you built from
+  (forks update from their own repo). The download uses https only and ignores your
+  own git configuration (rewrites, hooks, credential helpers). Checking signed tags
+  is a possible future hardening; it is not done today.
+- **Roll back:** the version you replaced is kept at
+  `~/Library/Application Support/AgentUsageBar/previous/AgentUsageBar.app` (not in
+  your Applications folder). Quit the app, move that copy to where the app was
+  (replacing the new one) and open it. The backup copy cannot update itself; it
+  says so. If the new app does not start, the update puts the backup back by itself.
+- **Turn checks off:** switch off "Check for updates" in the popover. The "Check now"
+  button still works when you press it.
+- **By hand:** `git pull && ./build.sh` still works, then quit and reopen the app.
+
+See [CHANGELOG.md](CHANGELOG.md) for what changed. `AgentUsageBar --version` prints
+the installed version.
 
 ## Supported agents
 - **Claude Code**: reads its sign-in from the login Keychain item

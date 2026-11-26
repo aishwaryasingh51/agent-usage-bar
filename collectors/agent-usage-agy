@@ -721,6 +721,9 @@ def listed(data, key):
   return data.get(key) is None or isinstance(data[key], list)
 
 
+CLAUDE_GPT_GROUP = "Claude & GPT models"
+
+
 def extract_limits(data):
   if not isinstance(data, dict) or "error" in data or not listed(data, "groups") or not listed(data, "buckets"):
     return None
@@ -753,13 +756,15 @@ def extract_limits(data):
   for group in groups:
     if group is gemini:
       continue
-    group_name = str(group.get("displayName") or "").strip()
-    short = "Claude/GPT" if "claude" in group_name.lower() else (group_name or "3P")
     buckets = group.get("buckets")
+    pool = {}
     for bucket in buckets if isinstance(buckets, list) else []:
-      if isinstance(bucket, dict) and (used(bucket) or 0) > 0:
-        title = f"{short} {'Weekly' if 'week' in str(bucket.get('window') or '').lower() else 'Session'}"
-        limits.append({"label": title, "title": title, "percent": used(bucket), "resetsAt": reset_of(bucket)})
+      if not isinstance(bucket, dict) or used(bucket) is None:
+        continue
+      pool["Weekly" if "week" in str(bucket.get("window") or bucket.get("bucketId") or "").lower() else "Session"] = bucket
+    for kind, label in _KINDS:
+      if kind in pool:
+        limits.append({"title": kind, "label": label, "group": CLAUDE_GPT_GROUP, "percent": used(pool[kind]), "resetsAt": reset_of(pool[kind])})
   return limits
 
 
@@ -799,18 +804,25 @@ _QUOTA_TIME_RE = re.compile(
 
 def parse_agy_quota_output(text, models_limits=()):
   """Pure parser for `agy -p /quota` output (tabular or single-space/ISO variants)."""
-  found = {}
+  found, pool = {}, {}
   for line in str(text or "").splitlines():
     low = line.lower()
-    if "gemini" not in low or "claude" in low or "gpt" in low:
+    third_party = "claude" in low or "gpt" in low
+    if "gemini" not in low and not third_party:
+      continue
+    if "gemini" in low and third_party:
       continue
     kind = "Session" if ("five" in low or "5 hour" in low or "5-hour" in low or "5h" in low) else ("Weekly" if "week" in low else None)
     percent = _QUOTA_PERCENT_RE.search(line)
     stamp = _QUOTA_TIME_RE.search(line, percent.end()) if percent else None
     when = parse_time(stamp.group(0).strip()) if stamp else None
-    if not kind or not percent or not when or when.year < 2000:
+    if not kind or not percent or not when:
       continue
-    found[kind] = (round(max(0.0, min(1.0, 1.0 - float(percent.group(1)) / 100.0)), 4), when)
+    spent = round(max(0.0, min(1.0, 1.0 - float(percent.group(1)) / 100.0)), 4)
+    if third_party:
+      pool[kind] = (spent, when)
+    elif when.year >= 2000:
+      found[kind] = (spent, when)
   limits = []
   for kind, label in _KINDS:
     if kind not in found:
@@ -823,6 +835,10 @@ def parse_agy_quota_output(text, models_limits=()):
         percent = fine["percent"]
         resets = fine["resetsAt"]
     limits.append({"label": label, "title": kind, "percent": percent, "resetsAt": resets})
+  for kind, label in _KINDS:
+    if kind in pool:
+      percent, when = pool[kind]
+      limits.append({"title": kind, "label": label, "group": CLAUDE_GPT_GROUP, "percent": percent, "resetsAt": format_utc_iso(when) if when.year >= 2000 else ""})
   return limits
 
 
@@ -946,7 +962,8 @@ def collect_limits(entries, force):
         gemini = gemini_model_limits(post("fetchAvailableModels", entry["accessToken"], project_body(assist)))
         gemini = agy_quota_limits(gemini) or gemini
         if gemini:
-          limits = gemini + [l for l in limits if l["title"] not in ("Session", "Weekly")]
+          have_pool = any(l.get("group") for l in gemini)
+          limits = gemini + [l for l in limits if l.get("group") and not have_pool or l["title"] not in ("Session", "Weekly")]
     except HttpError as error:
       if error.status in (401, 403):
         refused.append(entry)

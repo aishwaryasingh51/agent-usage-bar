@@ -24,6 +24,7 @@ struct PanelView: View {
                 ForEach(store.providers) { p in ProviderSection(provider: p).id(p.id) }
             }
             Divider()
+            UpdateBar()
             HStack {
                 Toggle("Launch at login", isOn: Binding(get: { store.launchAtLogin }, set: { store.setLaunchAtLogin($0) }))
                     .toggleStyle(.switch).controlSize(.small)
@@ -132,8 +133,20 @@ struct ProviderSection: View {
                 }
             }
 
-            ForEach(provider.windows(now: now), id: \.0.id) { w, pct in
+            let mainWindows = provider.windows(now: now)
+            if let heading = provider.mainPoolHeading, !mainWindows.isEmpty {
+                Text(heading).font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.top, 2)
+            }
+            ForEach(mainWindows, id: \.0.id) { w, pct in
                 LimitRow(window: w, percent: pct, now: now)
+            }
+            ForEach(provider.groupedWindows(now: now), id: \.name) { group in
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(group.name).font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.top, 2)
+                    ForEach(group.windows, id: \.0.id) { w, pct in
+                        LimitRow(window: w, percent: pct, now: now)
+                    }
+                }
             }
 
             if let days = provider.recentDays, days.contains(where: { ($0.messageCount ?? 0) > 0 }) {
@@ -199,6 +212,8 @@ struct LimitRow: View {
             if let r = window.resetDate, r > now {
                 Text("Resets in " + Fmt.duration(r.timeIntervalSince(now)))
                     .font(.caption).foregroundStyle(.secondary)
+            } else if window.isGrouped, (window.resetsAt ?? "").isEmpty, percent == 0 {
+                Text("Not used yet").font(.caption).foregroundStyle(.secondary)
             }
         }
     }

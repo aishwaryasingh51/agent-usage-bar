@@ -7,7 +7,9 @@ struct LimitWindow: Decodable, Identifiable {
     var title: String?
     var percent: Double?     // 0...1 fraction used
     var resetsAt: String?    // ISO-8601
-    var id: String { (title ?? "") + "|" + (label ?? "") }
+    var group: String?       // optional pool name (e.g. "Claude & GPT models"); nil = the provider's headline limits
+    var id: String { (group ?? "") + "|" + (title ?? "") + "|" + (label ?? "") }
+    var isGrouped: Bool { !(group ?? "").isEmpty }
 
     var displayTitle: String {
         if let t = title, !t.isEmpty { return t }
@@ -86,8 +88,22 @@ struct Provider: Decodable, Identifiable {
         return t.prefix(1).uppercased() + t.dropFirst()
     }
 
+    /// Headline windows only: grouped (secondary pool) limits never feed the bar, tabs or alarms.
     func windows(now: Date) -> [(LimitWindow, Double)] {
-        (limits ?? []).compactMap { w in w.effectivePercent(now: now).map { (w, $0) } }
+        (limits ?? []).filter { !$0.isGrouped }.compactMap { w in w.effectivePercent(now: now).map { (w, $0) } }
+    }
+    /// Secondary pools in first-seen order, each with its meters (empty groups omitted).
+    func groupedWindows(now: Date) -> [(name: String, windows: [(LimitWindow, Double)])] {
+        var order: [String] = []
+        for w in limits ?? [] where w.isGrouped && !order.contains(w.group!) { order.append(w.group!) }
+        return order.map { name in
+            (name: name, windows: (limits ?? []).filter { $0.group == name }.compactMap { w in w.effectivePercent(now: now).map { (w, $0) } })
+        }.filter { !$0.windows.isEmpty }
+    }
+    /// Subheading above the ungrouped limits, only when the provider also has grouped pools.
+    var mainPoolHeading: String? {
+        guard (limits ?? []).contains(where: { $0.isGrouped }) else { return nil }
+        return id == "agy" ? "Gemini models" : "Main plan"
     }
     func maxPercent(now: Date) -> Double? { windows(now: now).map { $0.1 }.max() }
 
@@ -145,10 +161,11 @@ struct Provider: Decodable, Identifiable {
         fails += demoShiftSelfTest()
         fails += LabelItem.selfTest()
         fails += expiredSelfTest()
+        fails += Updater.selfTest()
         return fails
     }
 
-    static let selfTestCount = 8 + 5 + 3 + 6 + 3
+    static let selfTestCount = 8 + 8 + 5 + 3 + 6 + 3 + 3 + Updater.selfTestCount
 
     /// Not ready because the sign-in expired (user has the plan): kept as a popover tab, never in the bar label.
     var signInExpired: Bool {
@@ -178,11 +195,38 @@ struct Provider: Decodable, Identifiable {
             ("five-hour label", #"[{"label":"Weekly","percent":0.9},{"label":"Five Hour","percent":0.2}]"#, 0.2),
             ("fallback shortest", #"[{"label":"A","percent":0.8,"resetsAt":"\#(later)"},{"label":"B","percent":0.3,"resetsAt":"\#(far)"}]"#, 0.3),
             ("no limits", "[]", nil),
+            ("grouped pool ignored", #"[{"label":"Session (5-hour)","title":"Session","percent":0.12,"resetsAt":"\#(far)"},{"label":"Weekly (7-day)","title":"Weekly","percent":0.71,"resetsAt":"\#(far)"},{"label":"Session (5-hour)","title":"Session","group":"Claude & GPT models","percent":0.95,"resetsAt":"\#(far)"},{"label":"Weekly (7-day)","title":"Weekly","group":"Claude & GPT models","percent":0.99,"resetsAt":"\#(far)"}]"#, 0.12),
+            ("grouped listed first", #"[{"label":"Session (5-hour)","title":"Session","group":"Claude & GPT models","percent":0.95,"resetsAt":"\#(far)"},{"label":"Session (5-hour)","title":"Session","percent":0.12,"resetsAt":"\#(far)"}]"#, 0.12),
+            ("only grouped", #"[{"label":"Session (5-hour)","title":"Session","group":"G","percent":0.5,"resetsAt":"\#(far)"}]"#, nil),
         ]
-        return cases.compactMap { name, json, want in
+        var fails = groupSelfTest()
+        fails += cases.compactMap { name, json, want in
             let got = prov(json)?.sessionPercent(now: Date())
             return got == want ? nil : "session \(name): got \(String(describing: got)), want \(String(describing: want))"
         }
+        return fails
+    }
+
+    private static func groupSelfTest() -> [String] {
+        let far = "2099-01-01T00:00:00Z"
+        let json = #"{"id":"agy","limits":[{"label":"Session (5-hour)","title":"Session","percent":0.12,"resetsAt":"\#(far)"},{"label":"Weekly (7-day)","title":"Weekly","percent":0.25,"resetsAt":"\#(far)"},{"label":"Session (5-hour)","title":"Session","group":"Claude & GPT models","percent":0.95,"resetsAt":"\#(far)"},{"label":"Weekly (7-day)","title":"Weekly","group":"Claude & GPT models","percent":0,"resetsAt":""}]}"#
+        guard let p = try? JSONDecoder().decode(Provider.self, from: Data(json.utf8)) else { return ["group: decode failed"] }
+        let now = Date()
+        var fails: [String] = []
+        if p.maxPercent(now: now) != 0.25 { fails.append("group: maxPercent \(String(describing: p.maxPercent(now: now))), want 0.25") }
+        if p.windows(now: now).count != 2 { fails.append("group: headline windows not ungrouped-only") }
+        let g = p.groupedWindows(now: now)
+        if g.count != 1 || g[0].name != "Claude & GPT models" || g[0].windows.count != 2 { fails.append("group: grouped windows wrong") }
+        if p.mainPoolHeading != "Gemini models" { fails.append("group: agy main heading") }
+        if (try! JSONDecoder().decode(Provider.self, from: Data(#"{"id":"x","limits":[{"label":"a","group":"G","percent":0.1}]}"#.utf8))).mainPoolHeading != "Main plan" { fails.append("group: default main heading") }
+        if Set((p.limits ?? []).map(\.id)).count != 4 { fails.append("group: duplicate limit ids") }
+        // Hottest provider and alarm use the headline pool only.
+        let hot = try! JSONDecoder().decode(Provider.self, from: Data(#"{"id":"b","limits":[{"label":"Session (5-hour)","title":"Session","percent":0.5,"resetsAt":"\#(far)"}]}"#.utf8))
+        if hot.mainPoolHeading != nil { fails.append("group: heading without groups") }
+        let candidates = [p, hot]
+        if candidates.max(by: { ($0.maxPercent(now: now) ?? -1) < ($1.maxPercent(now: now) ?? -1) })?.id != "b" { fails.append("group: hottest provider influenced by grouped limit") }
+        if (candidates.compactMap { $0.maxPercent(now: now) }.max() ?? 0) >= 0.9 { fails.append("group: alarm influenced by grouped limit") }
+        return fails
     }
 }
 
@@ -193,9 +237,11 @@ extension Provider {
     mutating func shiftForDemo(now: Date) {
         let offsets: [TimeInterval] = [2 * 3600 + 13 * 60, 3 * 86400 + 5 * 3600]
         let iso = ISO8601DateFormatter()
-        limits = limits?.enumerated().map { i, w in
+        limits = limits?.map { w in
             var w = w
-            w.resetsAt = iso.string(from: now.addingTimeInterval(offsets[min(i, 1)]))
+            guard !(w.resetsAt ?? "").isEmpty else { return w }  // keep "Not used yet" rows empty
+            let weekly = (w.title ?? w.label ?? "").lowercased().contains("week")
+            w.resetsAt = iso.string(from: now.addingTimeInterval(offsets[weekly ? 1 : 0]))
             return w
         }
         updatedAt = iso.string(from: now)
