@@ -17,6 +17,20 @@
       "title": "Weekly",
       "percent": 0.71,
       "resetsAt": "2099-01-01T00:00:00Z"
+    },
+    {
+      "label": "Session (5-hour)",
+      "title": "Session",
+      "group": "Claude & GPT models",
+      "percent": 0.3,
+      "resetsAt": "2099-01-01T00:00:00Z"
+    },
+    {
+      "label": "Weekly (7-day)",
+      "title": "Weekly",
+      "group": "Claude & GPT models",
+      "percent": 0.45,
+      "resetsAt": "2099-01-01T00:00:00Z"
     }
   ],
   "limitsStale": false,

@@ -26,7 +26,8 @@ ISO = (
 class ParserTests(unittest.TestCase):
   def test_real_table(self):
     out = mod.parse_agy_quota_output(REAL)
-    self.assertEqual([l["title"] for l in out], ["Session", "Weekly"])
+    self.assertEqual([l["title"] for l in out], ["Session", "Weekly", "Session", "Weekly"])
+    self.assertEqual([bool(l.get("group")) for l in out], [False, False, True, True])
     self.assertEqual(out[0], {"label": "Session (5-hour)", "title": "Session", "percent": 0.67, "resetsAt": "2026-11-26T20:14:00Z"})
     self.assertEqual(out[1], {"label": "Weekly (7-day)", "title": "Weekly", "percent": 0.17, "resetsAt": "2026-12-03T15:14:00Z"})
 
@@ -35,14 +36,51 @@ class ParserTests(unittest.TestCase):
     self.assertEqual(out[0], {"label": "Session (5-hour)", "title": "Session", "percent": 0.6703, "resetsAt": "2026-11-26T20:14:26Z"})
     self.assertEqual(out[1], {"label": "Weekly (7-day)", "title": "Weekly", "percent": 0.17, "resetsAt": "2026-12-03T15:14:26Z"})
 
-  def test_claude_gpt_ignored(self):
+  def test_claude_gpt_grouped(self):
     text = (
-      "Claude and GPT models  Weekly Limit Remaining  90%  1970-01-01 00:00 GMT\n"
-      "Claude and GPT models  Five Hour Limit Remaining  90%  2026-11-26 22:54 GMT\n"
-      "Claude Weekly 50% remaining resets 2026-12-02T21:51:00Z\n"
+      "Gemini Models\tWeekly Limit Remaining\t75%\t2026-12-03T15:14:26Z\n"
+      "Gemini Models\tFive Hour Limit Remaining\t0%\t2026-11-26T20:14:26Z\n"
+      "Claude and GPT models\tWeekly Limit Remaining\t62%\t2026-12-02T21:51:43Z\n"
+      "Claude and GPT models\tFive Hour Limit Remaining\t30%\t2026-11-26T22:54:05Z\n"
     )
-    self.assertEqual(mod.parse_agy_quota_output(text), [])
-    self.assertEqual(len(mod.parse_agy_quota_output(REAL + text)), 2)
+    out = mod.parse_agy_quota_output(text)
+    self.assertEqual([(l["title"], l.get("group")) for l in out], [
+      ("Session", None), ("Weekly", None),
+      ("Session", "Claude & GPT models"), ("Weekly", "Claude & GPT models")])
+    self.assertEqual(out[0]["percent"], 1.0)
+    self.assertEqual(out[2], {"title": "Session", "label": "Session (5-hour)", "group": "Claude & GPT models", "percent": 0.7, "resetsAt": "2026-11-26T22:54:05Z"})
+    self.assertEqual(out[3], {"title": "Weekly", "label": "Weekly (7-day)", "group": "Claude & GPT models", "percent": 0.38, "resetsAt": "2026-12-02T21:51:43Z"})
+
+  def test_untouched_pools_1970(self):
+    text = (
+      "Gemini Models\tWeekly Limit Remaining\t100%\t1970-01-01T00:00:00Z\n"
+      "Gemini Models\tFive Hour Limit Remaining\t75%\t2026-11-26T20:14:26Z\n"
+      "Claude and GPT models\tWeekly Limit Remaining\t100%\t1970-01-01T00:00:00Z\n"
+      "Claude and GPT models\tFive Hour Limit Remaining\t100%\t1970-01-01T00:00:00Z\n"
+    )
+    out = mod.parse_agy_quota_output(text)
+    self.assertEqual([(l["title"], l.get("group")) for l in out], [
+      ("Session", None), ("Session", "Claude & GPT models"), ("Weekly", "Claude & GPT models")])
+    self.assertEqual(out[1]["percent"], 0.0)
+    self.assertEqual(out[1]["resetsAt"], "")
+    self.assertEqual(out[2]["resetsAt"], "")
+
+  def test_extract_limits_groups(self):
+    data = {"groups": [
+      {"displayName": "Gemini models", "buckets": [
+        {"window": "5h", "remainingFraction": 0.8, "resetTime": "2026-11-26T20:14:26Z"},
+        {"window": "weekly", "remainingFraction": 0.5, "resetTime": "2026-12-03T15:14:26Z"}]},
+      {"displayName": "Claude and GPT models", "buckets": [
+        {"window": "5h", "remainingFraction": 1.0, "resetTime": "1970-01-01T00:00:00Z"},
+        {"window": "weekly", "remainingFraction": 0.62, "resetTime": "2026-12-02T21:51:43Z"}]},
+    ]}
+    out = mod.extract_limits(data)
+    self.assertEqual([(l["title"], l.get("group")) for l in out], [
+      ("Session", None), ("Weekly", None),
+      ("Session", "Claude & GPT models"), ("Weekly", "Claude & GPT models")])
+    self.assertEqual(out[2], {"title": "Session", "label": "Session (5-hour)", "group": "Claude & GPT models", "percent": 0.0, "resetsAt": ""})
+    self.assertEqual(out[3]["percent"], 0.38)
+    self.assertNotIn("group", out[0])
 
   def test_empty(self):
     self.assertEqual(mod.parse_agy_quota_output(""), [])

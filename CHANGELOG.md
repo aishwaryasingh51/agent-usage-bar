@@ -6,6 +6,10 @@ All notable changes to Agent Usage Bar are documented here. The format follows
 ## [0.3.0] - 2026-11-26
 
 ### Added
+- Antigravity's second quota pool, "Claude and GPT models", now shows in the
+  popover under its own subheading, with its 5-hour and weekly meters ("Not used
+  yet" until you use it). The menu bar number, the tabs and the red warning still
+  follow the Gemini limits only.
 - The app can now update itself. It checks GitHub for a newer release when it
   starts and then once a day (turn this off with the "Check for updates" switch
   in the popover). When a newer version exists, the popover shows "Update
