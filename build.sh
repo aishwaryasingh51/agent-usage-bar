@@ -33,6 +33,20 @@ cp "$ROOT"/App/Resources/Icons/*-template.svg "$APP/Contents/Resources/Icons/"
 cp "$ROOT/App/Resources/aub-swap.sh" "$APP/Contents/Resources/aub-swap.sh"
 chmod +x "$APP/Contents/Resources/aub-swap.sh"
 cp -R "$ROOT/docs/demo" "$APP/Contents/Resources/demo"
+# App icon: optional. If Resources/AppIcon.png (1024x1024) exists, build AppIcon.icns from it.
+ICON_PLIST=""
+if [ -f "$ROOT/Resources/AppIcon.png" ]; then
+  ICONTMP="$(mktemp -d)"
+  ICONSET="$ICONTMP/AppIcon.iconset"
+  mkdir -p "$ICONSET"
+  for sz in 16 32 128 256 512; do
+    sips -z $sz $sz "$ROOT/Resources/AppIcon.png" --out "$ICONSET/icon_${sz}x${sz}.png" >/dev/null
+    sips -z $((sz * 2)) $((sz * 2)) "$ROOT/Resources/AppIcon.png" --out "$ICONSET/icon_${sz}x${sz}@2x.png" >/dev/null
+  done
+  iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+  rm -rf "$ICONTMP"
+  ICON_PLIST="<key>CFBundleIconFile</key><string>AppIcon</string>"
+fi
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -45,6 +59,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>AUBUpdateRepo</key><string>$UPDATE_REPO</string>
+$ICON_PLIST
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
