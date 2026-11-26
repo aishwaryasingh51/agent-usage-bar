@@ -6,3 +6,4 @@ build/
 dist/
 *.xcodeproj/xcuserdata/
 capture_*.swift
+__pycache__/
