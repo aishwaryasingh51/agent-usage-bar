@@ -133,7 +133,11 @@ struct ProviderSection: View {
                 }
             }
 
-            ForEach(provider.windows(now: now), id: \.0.id) { w, pct in
+            let mainWindows = provider.windows(now: now)
+            if let heading = provider.mainPoolHeading, !mainWindows.isEmpty {
+                Text(heading).font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.top, 2)
+            }
+            ForEach(mainWindows, id: \.0.id) { w, pct in
                 LimitRow(window: w, percent: pct, now: now)
             }
             ForEach(provider.groupedWindows(now: now), id: \.name) { group in

@@ -100,6 +100,11 @@ struct Provider: Decodable, Identifiable {
             (name: name, windows: (limits ?? []).filter { $0.group == name }.compactMap { w in w.effectivePercent(now: now).map { (w, $0) } })
         }.filter { !$0.windows.isEmpty }
     }
+    /// Subheading above the ungrouped limits, only when the provider also has grouped pools.
+    var mainPoolHeading: String? {
+        guard (limits ?? []).contains(where: { $0.isGrouped }) else { return nil }
+        return id == "agy" ? "Gemini models" : "Main plan"
+    }
     func maxPercent(now: Date) -> Double? { windows(now: now).map { $0.1 }.max() }
 
     /// Menu bar value: the 5-hour session window. Picks the limit whose title/label says
@@ -160,7 +165,7 @@ struct Provider: Decodable, Identifiable {
         return fails
     }
 
-    static let selfTestCount = 8 + 8 + 5 + 3 + 6 + 3 + Updater.selfTestCount
+    static let selfTestCount = 8 + 8 + 5 + 3 + 6 + 3 + 3 + Updater.selfTestCount
 
     /// Not ready because the sign-in expired (user has the plan): kept as a popover tab, never in the bar label.
     var signInExpired: Bool {
@@ -212,9 +217,12 @@ struct Provider: Decodable, Identifiable {
         if p.windows(now: now).count != 2 { fails.append("group: headline windows not ungrouped-only") }
         let g = p.groupedWindows(now: now)
         if g.count != 1 || g[0].name != "Claude & GPT models" || g[0].windows.count != 2 { fails.append("group: grouped windows wrong") }
+        if p.mainPoolHeading != "Gemini models" { fails.append("group: agy main heading") }
+        if (try! JSONDecoder().decode(Provider.self, from: Data(#"{"id":"x","limits":[{"label":"a","group":"G","percent":0.1}]}"#.utf8))).mainPoolHeading != "Main plan" { fails.append("group: default main heading") }
         if Set((p.limits ?? []).map(\.id)).count != 4 { fails.append("group: duplicate limit ids") }
         // Hottest provider and alarm use the headline pool only.
         let hot = try! JSONDecoder().decode(Provider.self, from: Data(#"{"id":"b","limits":[{"label":"Session (5-hour)","title":"Session","percent":0.5,"resetsAt":"\#(far)"}]}"#.utf8))
+        if hot.mainPoolHeading != nil { fails.append("group: heading without groups") }
         let candidates = [p, hot]
         if candidates.max(by: { ($0.maxPercent(now: now) ?? -1) < ($1.maxPercent(now: now) ?? -1) })?.id != "b" { fails.append("group: hottest provider influenced by grouped limit") }
         if (candidates.compactMap { $0.maxPercent(now: now) }.max() ?? 0) >= 0.9 { fails.append("group: alarm influenced by grouped limit") }
