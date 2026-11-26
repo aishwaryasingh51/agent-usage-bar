@@ -1,16 +1,33 @@
-# Agent Usage Bar
+<p align="center"><img src="docs/icon.png" width="128" alt="Agent Usage Bar icon"></p>
 
-A small macOS menu bar app that shows how much of your AI coding agent usage
-limits you have used (session and weekly windows), so you are not surprised by a
-rate limit.
+<h1 align="center">Agent Usage Bar</h1>
 
-![Menu bar](docs/menubar.png)
+<p align="center">A small macOS menu bar app that shows how much of your AI coding agent usage limits you have used, so you are not surprised by a rate limit.</p>
 
-![screenshot](docs/screenshot.png)
+<p align="center">
+<a href="https://github.com/aishwaryasingh51/agent-usage-bar/releases/latest"><img src="https://img.shields.io/github/v/release/aishwaryasingh51/agent-usage-bar" alt="Latest release"></a>
+</p>
+
+<p align="center"><a href="#build-and-install">Install</a> · <a href="#updating">Updating</a> · <a href="https://github.com/aishwaryasingh51/agent-usage-bar/releases/latest">Latest release</a></p>
+
+<p align="center"><img src="docs/menubar.png" alt="The menu bar item: the Claude logo with 34% and the Antigravity logo with 12%, how much of each usage limit is used"></p>
+
+<p align="center"><img src="docs/screenshot.png" width="420" alt="The popover for Antigravity: Gemini models and Claude &amp; GPT models sections with session and weekly meters, a 7-day token chart, top models, an Update available banner with an Update button, a Check for updates switch and a Launch at login switch"></p>
 
 > **Unofficial.** It uses undocumented endpoints (`api.anthropic.com/api/oauth/usage`,
 > Google `cloudcode-pa` `v1internal`, and the `/quota` output of `agy`) that may
 > break whenever those CLIs update. Not affiliated with Anthropic or Google.
+
+## What's new in 0.3.0
+- **Updates from inside the app.** It checks GitHub releases and asks before
+  installing, showing the version and the commit it will build. It builds and
+  verifies the new version before swapping, keeps the previous one as a backup, and
+  puts it back automatically if the new one fails to start. You can turn the check off.
+- **Antigravity's second quota pool.** "Claude & GPT models" now has its own
+  section, with its own session and weekly meters.
+- **A new app icon.**
+
+See [CHANGELOG.md](CHANGELOG.md) for the full list.
 
 ## Requirements
 - macOS 14 or later (Apple silicon)
