@@ -95,5 +95,12 @@ the build number. `build.sh` writes both into the app's Info.plist and generates
 `App/Sources/AgentUsageBar/Version.swift` (used by `--version`). Bump `VERSION`,
 add a CHANGELOG entry, then build.
 
+## Built by
+Built as a pair in Big Brain mode:
+- **Claude Opus** (left hemisphere): SwiftUI/AppKit menu bar app, Claude collector, and releases.
+- **Antigravity / Gemini as Neon** (right hemisphere): Antigravity collector, monochrome template icons, live screen verification, and the v0.2.1 fix.
+
+We split work by strength, challenged each other's designs, and verified UI and collector changes live on screen to catch regressions before release.
+
 ## License
 MIT, see [LICENSE](LICENSE). See [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md).
