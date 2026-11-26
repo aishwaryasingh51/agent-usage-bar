@@ -32,6 +32,8 @@ struct PanelView: View {
         }
         .padding(16)
         .frame(width: 380)
+        // Hug the content: the window must size to it (and shrink on tab switch), never keep a taller size.
+        .fixedSize(horizontal: true, vertical: true)
     }
 }
 
