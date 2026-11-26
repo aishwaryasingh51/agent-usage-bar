@@ -4,6 +4,8 @@ A small macOS menu bar app that shows how much of your AI coding agent usage
 limits you have used (session and weekly windows), so you are not surprised by a
 rate limit.
 
+![Menu bar](docs/menubar.png)
+
 ![screenshot](docs/screenshot.png)
 
 > **Unofficial.** It uses undocumented endpoints (`api.anthropic.com/api/oauth/usage`,
@@ -21,6 +23,13 @@ rate limit.
 
 The app is ad-hoc signed and built locally, so Gatekeeper does not quarantine it.
 Set `INSTALL_DIR` to install somewhere other than `~/Applications`.
+
+## Updating
+    cd agent-usage-bar
+    git pull && ./build.sh
+
+Then quit and reopen the app. See [CHANGELOG.md](CHANGELOG.md) for what changed.
+`AgentUsageBar --version` prints the installed version.
 
 ## Supported agents
 - **Claude Code**: reads its sign-in from the login Keychain item
@@ -77,6 +86,12 @@ Turn off "Launch at login" in the popover first, then:
     osascript -e 'quit app "AgentUsageBar"'
     rm -rf ~/Applications/AgentUsageBar.app
     rm -rf ~/.cache/agent-usage-bar ~/.local/state/agent-usage-bar ~/.config/agent-usage-bar
+
+## Versioning
+The `VERSION` file is the single source of truth: line 1 is the version, line 2
+the build number. `build.sh` writes both into the app's Info.plist and generates
+`App/Sources/AgentUsageBar/Version.swift` (used by `--version`). Bump `VERSION`,
+add a CHANGELOG entry, then build.
 
 ## License
 MIT, see [LICENSE](LICENSE). See [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md).

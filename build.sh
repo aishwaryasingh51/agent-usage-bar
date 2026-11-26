@@ -3,7 +3,11 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 APP="${INSTALL_DIR:-$HOME/Applications}/AgentUsageBar.app"
+# VERSION: line 1 = marketing version, line 2 = build number.
+VERSION="$(sed -n 1p "$ROOT/VERSION" | tr -d '[:space:]')"
+BUILD_NUMBER="$(sed -n 2p "$ROOT/VERSION" | tr -d '[:space:]')"
 cd "$ROOT/App"
+echo "let appVersion = \"$VERSION\"  // generated from VERSION by build.sh" > Sources/AgentUsageBar/Version.swift
 swift build -c release --arch arm64
 BIN="$(swift build -c release --arch arm64 --show-bin-path)/AgentUsageBar"
 rm -rf "$APP"
@@ -21,8 +25,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <key>CFBundleName</key><string>Agent Usage Bar</string>
 <key>CFBundleExecutable</key><string>AgentUsageBar</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>1.0</string>
-<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleShortVersionString</key><string>$VERSION</string>
+<key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>

@@ -8,6 +8,7 @@ struct AgentUsageBarApp: App {
     init() {
         // Debug aid: `AgentUsageBar --snapshot <dir>` renders the popover and bar label to PNGs, then exits.
         let a = CommandLine.arguments
+        if a.contains("--version") { print("Agent Usage Bar \(appVersion)"); exit(0) }
         if a.contains("--selftest") {
             let fails = Provider.selfTest()
             if fails.isEmpty { print("selftest: \(Provider.selfTestCount)/\(Provider.selfTestCount) passed"); exit(0) }
