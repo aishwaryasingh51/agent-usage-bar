@@ -4,10 +4,6 @@
 
 <p align="center">A small macOS menu bar app that shows how much of your AI coding agent usage limits you have used, so you are not surprised by a rate limit.</p>
 
-<p align="center">
-<a href="https://github.com/aishwaryasingh51/agent-usage-bar/releases/latest"><img src="https://img.shields.io/github/v/release/aishwaryasingh51/agent-usage-bar" alt="Latest release"></a>
-</p>
-
 <p align="center"><a href="#build-and-install">Install</a> · <a href="#updating">Updating</a> · <a href="https://github.com/aishwaryasingh51/agent-usage-bar/releases/latest">Latest release</a></p>
 
 <p align="center"><img src="docs/menubar.png" alt="The menu bar item: the Claude logo with 34% and the Antigravity logo with 12%, how much of each usage limit is used"></p>
