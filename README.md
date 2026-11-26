@@ -25,11 +25,30 @@ The app is ad-hoc signed and built locally, so Gatekeeper does not quarantine it
 Set `INSTALL_DIR` to install somewhere other than `~/Applications`.
 
 ## Updating
-    cd agent-usage-bar
-    git pull && ./build.sh
+The app checks GitHub for a newer release when it starts and once a day, and only
+tells you: the popover shows "Update available: vX.Y.Z", a "What's new" link and an
+**Update** button. Nothing is installed without your confirmation. Pressing Update
+downloads that release's source into
+`~/Library/Application Support/AgentUsageBar/src`, builds it on your Mac with
+`build.sh`, runs the new build's `--version` and `--selftest`, and only then restarts
+into it. If any step fails, the current app is left alone and the popover shows the
+error and the log (`~/Library/Logs/AgentUsageBar/update.log`).
 
-Then quit and reopen the app. See [CHANGELOG.md](CHANGELOG.md) for what changed.
-`AgentUsageBar --version` prints the installed version.
+- **Requirements:** git and the Xcode Command Line Tools (`xcode-select --install`).
+  Without them the popover only links to the release.
+- **Trust:** pressing Update builds and runs code from this repository, exactly as
+  running `./build.sh` yourself would. Only update if you trust the repo you built from
+  (forks update from their own repo).
+- **Roll back:** the previous version is kept next to the app as
+  `AgentUsageBar.previous.app`. Quit the app, delete `AgentUsageBar.app`, rename the
+  `.previous` one back, and open it. If the new app does not start, the update
+  restores the previous one by itself.
+- **Turn checks off:** switch off "Check for updates" in the popover. The "Check now"
+  button still works when you press it.
+- **By hand:** `git pull && ./build.sh` still works, then quit and reopen the app.
+
+See [CHANGELOG.md](CHANGELOG.md) for what changed. `AgentUsageBar --version` prints
+the installed version.
 
 ## Supported agents
 - **Claude Code**: reads its sign-in from the login Keychain item

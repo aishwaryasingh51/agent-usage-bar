@@ -79,7 +79,7 @@ enum CheckoutGuard {
     /// Why the managed checkout must not be used (nil = fine to use).
     static func refusal(porcelain: String, remote: String, expected: String) -> String? {
         if !remoteMatches(remote, expected) {
-            return "The update checkout points at a different repository (\(remote)). Delete \(UpdatePaths.checkout.path) to let the app recreate it."
+            return "The update checkout points at a different repository (\(remote.trimmingCharacters(in: .whitespacesAndNewlines))). Delete \(UpdatePaths.checkout.path) to let the app recreate it."
         }
         if !porcelain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return "The update checkout has local changes, so it was not touched. Delete \(UpdatePaths.checkout.path) to let the app recreate it."
@@ -436,6 +436,7 @@ enum Updater {
             throw UpdateError("This build has no swap helper (aub-swap.sh).")
         }
         let fm = FileManager.default
+        try fm.createDirectory(at: UpdatePaths.support, withIntermediateDirectories: true)
         try? fm.removeItem(at: UpdatePaths.helper)
         try fm.copyItem(at: res, to: UpdatePaths.helper)
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: UpdatePaths.helper.path)
@@ -451,7 +452,9 @@ enum Updater {
 
         let args = ["/bin/bash", UpdatePaths.helper.path, String(getpid()), installed.path, staged.path, UpdatePaths.logFile.path]
         let argv: [UnsafeMutablePointer<CChar>?] = args.map { strdup($0) } + [nil]
-        let envp: [UnsafeMutablePointer<CChar>?] = baseEnv().map { strdup("\($0.key)=\($0.value)") } + [nil]
+        var henv = baseEnv()
+        for k in ["AUB_OPEN_CMD", "AUB_SETTLE_SECONDS"] { if let v = ProcessInfo.processInfo.environment[k] { henv[k] = v } }   // test hooks
+        let envp: [UnsafeMutablePointer<CChar>?] = henv.map { strdup("\($0.key)=\($0.value)") } + [nil]
         defer { argv.forEach { free($0) }; envp.forEach { free($0) } }
         var pid: pid_t = 0
         UpdateLog.write("launching swap helper for pid \(getpid()): \(installed.path) <- \(staged.path)")
@@ -479,6 +482,11 @@ enum Updater {
                 exit(0)
             case .failure(let e): print("error: \(e)"); exit(1)
             }
+        }
+        // Test hook: hand a given staged .app to the real swap helper, then quit (exercises the detached spawn).
+        if let staged = arg("--update-swap-test") {
+            do { try launchSwap(staged: URL(fileURLWithPath: staged)); print("swap helper launched"); exit(0) }
+            catch { print("error: \(error)"); exit(1) }
         }
         if a.contains("--update-dry-run") {
             let tag: String

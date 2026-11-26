@@ -3,6 +3,21 @@
 All notable changes to Agent Usage Bar are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0] - 2026-11-26
+
+### Added
+- The app can now update itself. It checks GitHub for a newer release when it
+  starts and then once a day (turn this off with the "Check for updates" switch
+  in the popover). When a newer version exists, the popover shows "Update
+  available", a "What's new" link and an Update button. Nothing is installed
+  silently: pressing Update asks you to confirm, then the app downloads the
+  source for that release, builds it on your Mac, checks the new build, and
+  restarts into it. Your previous version is kept as `AgentUsageBar.previous.app`
+  next to the app. If anything fails, the current version stays untouched and the
+  popover shows what went wrong and where the log is. In-app updating needs git
+  and the Xcode Command Line Tools (`xcode-select --install`); without them the
+  app only tells you a new version exists and links to it.
+
 ## [0.2.2] - 2026-11-26
 
 ### Changed
@@ -55,6 +70,7 @@ First public release.
 - Demo mode with synthetic data.
 - MIT licence, Omarchy credit and a trademarks note.
 
+[0.3.0]: https://github.com/aishwaryasingh51/agent-usage-bar/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/aishwaryasingh51/agent-usage-bar/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/aishwaryasingh51/agent-usage-bar/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/aishwaryasingh51/agent-usage-bar/compare/v0.1.0...v0.2.0
