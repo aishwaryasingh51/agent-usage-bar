@@ -3,6 +3,14 @@
 All notable changes to Agent Usage Bar are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.2] - 2026-11-26
+
+### Changed
+- The menu bar and the popover tabs now show only the subscriptions this Mac
+  actually has. A Claude-only Mac shows just the Claude logo and percentage, with
+  no tabs. If none is signed in yet, the bar shows one neutral logo with a dash
+  and the popover lists the sign-in instructions.
+
 ## [0.2.1] - 2026-11-26
 
 ### Fixed
@@ -47,6 +55,7 @@ First public release.
 - Demo mode with synthetic data.
 - MIT licence, Omarchy credit and a trademarks note.
 
+[0.2.2]: https://github.com/aishwaryasingh51/agent-usage-bar/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/aishwaryasingh51/agent-usage-bar/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/aishwaryasingh51/agent-usage-bar/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/aishwaryasingh51/agent-usage-bar/releases/tag/v0.1.0

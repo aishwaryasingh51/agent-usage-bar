@@ -5,8 +5,9 @@ struct PanelView: View {
     @EnvironmentObject var store: Store
 
     private var selected: Provider? {
-        if let id = store.selectedId, let p = store.providers.first(where: { $0.id == id }) { return p }
-        return store.providers.first(where: { $0.id == store.topProviderId }) ?? store.providers.first
+        let ready = store.tabProviders
+        if let id = store.selectedId, let p = ready.first(where: { $0.id == id }) { return p }
+        return store.readyProviders.first(where: { $0.id == store.topProviderId }) ?? ready.first(where: { $0.id == store.topProviderId }) ?? ready.first
     }
 
     var body: some View {
@@ -15,8 +16,13 @@ struct PanelView: View {
                 Text("No usage data yet.\nCollectors write JSON to\n\(Store.usageDir.path)")
                     .font(.callout).foregroundStyle(.secondary)
             }
-            if store.providers.count > 1 { ProviderSwitcher(selected: selected?.id) }
-            if let p = selected { ProviderSection(provider: p).id(p.id) }
+            if store.tabProviders.count > 1 { ProviderSwitcher(selected: selected?.id) }
+            if let p = selected {
+                ProviderSection(provider: p).id(p.id)
+            } else {
+                // Nothing ready: show every provider's sign-in help.
+                ForEach(store.providers) { p in ProviderSection(provider: p).id(p.id) }
+            }
             Divider()
             HStack {
                 Toggle("Launch at login", isOn: Binding(get: { store.launchAtLogin }, set: { store.setLaunchAtLogin($0) }))
@@ -41,7 +47,7 @@ struct ProviderSwitcher: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            ForEach(store.providers) { p in
+            ForEach(store.tabProviders) { p in
                 let on = p.id == selected
                 let pct = p.maxPercent(now: store.now)
                 Button { store.selectedId = p.id } label: {

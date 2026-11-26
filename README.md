@@ -40,9 +40,11 @@ Then quit and reopen the app. See [CHANGELOG.md](CHANGELOG.md) for what changed.
 On first run macOS asks whether `security` may access the Keychain item. Choose
 **Always Allow** so it does not ask on every refresh.
 
-The menu bar label shows every agent side by side: its logo and the percentage
-of its 5-hour session limit used (for example `[claude] 7%  [agy] 18%`). A provider
-that is not ready shows `–`, and a number turns red at 90%. Click anywhere on the
+The menu bar label shows only the agents this Mac has set up (ready), side by side:
+its logo and the percentage of its 5-hour session limit used (for example
+`[claude] 7%  [agy] 18%`; a Claude-only Mac shows just `[claude] 7%`). If none is ready
+it shows one neutral logo with `–`. The popover tabs follow the same rule, and with
+nothing ready it shows the sign-in instructions. A number turns red at 90%. Click anywhere on the
 label for the full popover with weekly windows and details. The app refreshes every 15 minutes
 (3 minutes when any limit is at 90% or more) and turns red at 90%.
 "Launch at login" is on by default; toggle it in the popover.

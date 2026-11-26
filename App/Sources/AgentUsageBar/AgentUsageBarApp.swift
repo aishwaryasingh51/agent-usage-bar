@@ -179,11 +179,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 }
 
-/// One entry per provider, in switcher order: logo + 5-hour session %, or "–" when not ready.
+/// One entry per ready provider, in switcher order: logo + 5-hour session %.
+/// When none are ready, a single neutral entry (first provider's logo, "–").
 struct LabelItem: Equatable {
     let id: String
-    let percent: Double?   // nil = not ready / unknown
+    let percent: Double?   // nil = unknown
     var alarming: Bool { (percent ?? 0) >= 0.9 }
+
+    static func items(for providers: [Provider], now: Date) -> [LabelItem] {
+        let ready = providers.filter { $0.ready != false }
+        if ready.isEmpty { return providers.first.map { [LabelItem(id: $0.id, percent: nil)] } ?? [] }
+        return ready.map { LabelItem(id: $0.id, percent: $0.sessionPercent(now: now)) }
+    }
+
+    static func selfTest() -> [String] {
+        func prov(_ id: String, ready: Bool?) -> Provider {
+            let r = ready.map { ",\"ready\":\($0)" } ?? ""
+            let json = #"{"id":"\#(id)"\#(r),"limits":[{"label":"Session (5-hour)","percent":0.4,"resetsAt":"2099-01-01T00:00:00Z"}]}"#
+            return try! JSONDecoder().decode(Provider.self, from: Data(json.utf8))
+        }
+        let now = Date()
+        let cases: [(String, [Provider], [String], [Double?])] = [
+            ("both ready", [prov("claude", ready: true), prov("agy", ready: true)], ["claude", "agy"], [0.4, 0.4]),
+            ("ready unset counts as ready", [prov("claude", ready: nil), prov("agy", ready: true)], ["claude", "agy"], [0.4, 0.4]),
+            ("one ready", [prov("claude", ready: true), prov("agy", ready: false)], ["claude"], [0.4]),
+            ("other one ready", [prov("claude", ready: false), prov("agy", ready: true)], ["agy"], [0.4]),
+            ("none ready", [prov("claude", ready: false), prov("agy", ready: false)], ["claude"], [nil]),
+            ("no providers", [], [], []),
+        ]
+        return cases.compactMap { name, ps, ids, pcts in
+            let got = items(for: ps, now: now)
+            return got.map(\.id) == ids && got.map(\.percent) == pcts ? nil : "label \(name): got \(got)"
+        }
+    }
 }
 
 /// A single bitmap holding every provider. Template (monochrome) normally; when any
@@ -263,7 +291,7 @@ enum Snapshot {
     static func write(dir: String) {
         let store = Store()
         for (name, scheme) in [("light", ColorScheme.light), ("dark", .dark)] {
-            for p in [nil] + store.providers.map({ Optional($0.id) }) {
+            for p in [nil] + store.readyProviders.map({ Optional($0.id) }) {
             store.selectedId = p
             let view = PanelView().environmentObject(store)
                 .background(scheme == .dark ? Color(white: 0.16) : Color(white: 0.96))

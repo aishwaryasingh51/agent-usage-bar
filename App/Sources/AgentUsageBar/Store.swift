@@ -74,10 +74,12 @@ final class Store: ObservableObject {
     var topProviderId: String? {
         candidates.max { ($0.maxPercent(now: now) ?? -1) < ($1.maxPercent(now: now) ?? -1) }?.id
     }
-    /// Menu bar label entries: every provider (switcher order), session % or nil when not ready.
-    var labelItems: [LabelItem] {
-        providers.map { LabelItem(id: $0.id, percent: $0.ready == false ? nil : $0.sessionPercent(now: now)) }
-    }
+    /// Providers this Mac actually has (ready); drive the label and the popover tabs.
+    var readyProviders: [Provider] { providers.filter { $0.ready != false } }
+    /// Popover tabs: ready providers plus ones whose sign-in expired (so the user sees how to sign in again).
+    var tabProviders: [Provider] { providers.filter { $0.ready != false || $0.signInExpired } }
+    /// Menu bar label entries: ready providers only; one neutral "–" entry when none are ready.
+    var labelItems: [LabelItem] { LabelItem.items(for: providers, now: now) }
     var balanceAlarming: Bool { providers.contains { $0.balance?.alarming == true } }
     var alarming: Bool { (topPercent ?? 0) >= 0.9 || balanceAlarming }
 

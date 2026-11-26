@@ -143,10 +143,29 @@ struct Provider: Decodable, Identifiable {
         }
         fails += sessionSelfTest()
         fails += demoShiftSelfTest()
+        fails += LabelItem.selfTest()
+        fails += expiredSelfTest()
         return fails
     }
 
-    static let selfTestCount = 8 + 5 + 3
+    static let selfTestCount = 8 + 5 + 3 + 6 + 3
+
+    /// Not ready because the sign-in expired (user has the plan): kept as a popover tab, never in the bar label.
+    var signInExpired: Bool {
+        guard ready == false else { return false }
+        return [authHelpText, usageStatusText].contains { $0?.localizedCaseInsensitiveContains("expired") == true }
+    }
+
+    private static func expiredSelfTest() -> [String] {
+        func p(_ extra: String) -> Provider {
+            try! JSONDecoder().decode(Provider.self, from: Data(#"{"id":"agy","ready":false\#(extra)}"#.utf8))
+        }
+        var fails: [String] = []
+        if !p(#","authHelpText":"Your sign-in has Expired. Run agy.\#""#).signInExpired { fails.append("expired: help text not detected") }
+        if !p(#","usageStatusText":"token expired\#""#).signInExpired { fails.append("expired: status text not detected") }
+        if p("").signInExpired { fails.append("expired: never-set-up provider treated as expired") }
+        return fails
+    }
 
     private static func sessionSelfTest() -> [String] {
         func prov(_ limits: String) -> Provider? {
