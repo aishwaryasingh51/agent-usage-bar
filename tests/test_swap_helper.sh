@@ -101,5 +101,15 @@ check "decoy running does not make a dead new app look healthy" '[ $rc = 2 ] && 
 check "rollback leaves the decoy process alone" 'kill -0 $DPID 2>/dev/null'
 kill $DPID 2>/dev/null
 
+# 7. A second instance of the installed app is still running: refuse before moving anything.
+reset; I="$W/case/Apps/AgentUsageBar.app"; B="$W/case/support/previous/AgentUsageBar.app"
+mkapp "$I" old; mkapp "$W/case/staging/AgentUsageBar.app" new bad
+nohup "$I/Contents/MacOS/AgentUsageBar" 600 >/dev/null 2>&1 & IPID=$!
+sleep 0.5
+runswap "$I" "$W/case/staging/AgentUsageBar.app" "$B"; rc=$?
+check "second instance: refused (exit 1, logged)" '[ $rc = 1 ] && grep -q "another instance" "$W/log"'
+check "second instance: nothing moved" '[ "$(cat "$I/TAG")" = old ] && [ -d "$W/case/staging/AgentUsageBar.app" ] && [ ! -e "$B" ]'
+kill $IPID 2>/dev/null
+
 echo "swap-helper tests: $pass passed, $fail failed"
 [ "$fail" = 0 ]

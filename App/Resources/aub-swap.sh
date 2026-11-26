@@ -56,6 +56,8 @@ while kill -0 "$PID" 2>/dev/null; do
   sleep 0.5
 done
 log "app exited"
+# Another instance of the same installed bundle (open -n) would keep matching is_running and mask a broken new build.
+is_running "$INSTALLED" && fail "another instance of $INSTALLED is still running; nothing was changed"
 
 # 2. Move the current bundle to the backup spot (replacing an older backup), then the new one in.
 mkdir -p "$(dirname "$BACKUP")" || fail "could not create the backup folder"
