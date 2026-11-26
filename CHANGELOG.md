@@ -29,6 +29,13 @@ All notable changes to Agent Usage Bar are documented here. The format follows
   clears the build cache of the update checkout. The restart helper is copied
   from the app being replaced, so each update uses the helper of the version you
   are updating from.
+- A new app icon.
+
+### Fixed
+- Update hardening: only one update can run at a time (single update lock); the
+  backup copy can never take over the "Launch at login" item; the release tag's
+  commit is verified before it is checked out; and the swap refuses to run while
+  another copy of the app is running.
 
 ## [0.2.2] - 2026-11-26
 
