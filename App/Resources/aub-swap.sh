@@ -68,7 +68,8 @@ log "moved current bundle to $BACKUP"
 if ! mv "$STAGED" "$INSTALLED"; then
   log "ERROR: could not move the new bundle into place; restoring the previous one"
   rm -rf "$INSTALLED"   # a failed cross-volume move can leave a partial copy
-  mv "$BACKUP" "$INSTALLED" && log "restored previous bundle"
+  if mv "$BACKUP" "$INSTALLED"; then log "restored previous bundle"
+  else log "ERROR: could not restore the previous bundle from $BACKUP"; exit 1; fi
   "$OPEN_CMD" "$INSTALLED" >>"$LOG" 2>&1
   exit 1
 fi

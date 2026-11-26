@@ -37,6 +37,7 @@ cp -R "$ROOT/docs/demo" "$APP/Contents/Resources/demo"
 ICON_PLIST=""
 if [ -f "$ROOT/Resources/AppIcon.png" ]; then
   ICONTMP="$(mktemp -d)"
+  trap 'rm -rf "$ICONTMP"' EXIT
   ICONSET="$ICONTMP/AppIcon.iconset"
   mkdir -p "$ICONSET"
   for sz in 16 32 128 256 512; do
