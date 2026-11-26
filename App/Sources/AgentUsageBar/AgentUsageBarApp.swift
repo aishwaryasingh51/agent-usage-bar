@@ -23,6 +23,9 @@ struct AgentUsageBarApp: App {
             }
             exit(0)
         }
+        // Hidden test hooks for the self-updater: --update-check, --update-dry-run [--update-source P] [--update-tag vX.Y.Z],
+        // --fake-version X.Y.Z, --fake-latest vX.Y.Z (stubbed "update available" for UI tests).
+        Updater.runCLIIfRequested()
         if let i = a.firstIndex(of: "--snapshot"), i + 1 < a.count {
             let dir = a[i + 1]
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
