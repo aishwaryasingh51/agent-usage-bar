@@ -24,6 +24,7 @@ struct PanelView: View {
                 ForEach(store.providers) { p in ProviderSection(provider: p).id(p.id) }
             }
             Divider()
+            UpdateBar()
             HStack {
                 Toggle("Launch at login", isOn: Binding(get: { store.launchAtLogin }, set: { store.setLaunchAtLogin($0) }))
                     .toggleStyle(.switch).controlSize(.small)

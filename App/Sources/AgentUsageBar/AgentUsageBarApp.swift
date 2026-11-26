@@ -42,13 +42,15 @@ struct AgentUsageBarApp: App {
 
 struct PanelRoot: View {
     @ObservedObject var store: Store
-    var body: some View { PanelView().environmentObject(store) }
+    @ObservedObject var updater: UpdateManager
+    var body: some View { PanelView().environmentObject(store).environmentObject(updater) }
 }
 
 /// NSStatusItem + NSPopover: the popover tracks the SwiftUI ideal size both ways (grow and shrink).
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let store = Store()
+    private let updater = UpdateManager()
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private var host: NSHostingController<PanelRoot>!
@@ -62,7 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        host = NSHostingController(rootView: PanelRoot(store: store))
+        host = NSHostingController(rootView: PanelRoot(store: store, updater: updater))
         host.sizingOptions = [.preferredContentSize]
         popover = NSPopover()
         popover.behavior = .transient
@@ -79,6 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             }
         }
         updateLabel(force: true)
+        updater.start()
 
         store.objectWillChange.sink { [weak self] _ in
             // objectWillChange fires before the value lands; look again on the next turn.
@@ -293,10 +296,11 @@ enum ProviderIcon {
 enum Snapshot {
     static func write(dir: String) {
         let store = Store()
+        let updater = UpdateManager()   // --fake-latest vX.Y.Z stubs the "update available" state
         for (name, scheme) in [("light", ColorScheme.light), ("dark", .dark)] {
             for p in [nil] + store.readyProviders.map({ Optional($0.id) }) {
             store.selectedId = p
-            let view = PanelView().environmentObject(store)
+            let view = PanelView().environmentObject(store).environmentObject(updater)
                 .background(scheme == .dark ? Color(white: 0.16) : Color(white: 0.96))
                 .environment(\.colorScheme, scheme)
             let r = ImageRenderer(content: view); r.scale = 2

@@ -129,8 +129,8 @@ enum UpdateLog {
 
     /// Keep the log from growing without bound: drop it when over 1 MB (called at the start of an update).
     static func rotateIfLarge() {
-        let size = (try? FileManager.default.attributesOfItem(atPath: UpdatePaths.logFile.path)[.size] as? Int) ?? 0
-        if (size ?? 0) > 1_000_000 { try? FileManager.default.removeItem(at: UpdatePaths.logFile) }
+        let size = ((try? FileManager.default.attributesOfItem(atPath: UpdatePaths.logFile.path))?[.size] as? Int) ?? 0
+        if size > 1_000_000 { try? FileManager.default.removeItem(at: UpdatePaths.logFile) }
     }
 }
 
