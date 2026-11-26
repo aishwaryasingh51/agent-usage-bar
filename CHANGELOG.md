@@ -3,6 +3,16 @@
 All notable changes to Agent Usage Bar are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.1] - 2026-11-26
+
+### Fixed
+- Antigravity now shows both the 5-hour session and the weekly limit. When
+  `agy /quota` could not be read inside the app, only a single limit was shown,
+  mislabelled as weekly. The `agy` call now runs with a clean `PATH` that
+  includes Homebrew, waits longer, and retries once.
+- The per-model fallback sorts limits into session or weekly by when they
+  reset, instead of always calling them weekly.
+
 ## [0.2.0] - 2026-11-26
 
 ### Added

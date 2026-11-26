@@ -763,69 +763,108 @@ def extract_limits(data):
   return limits
 
 
-def gemini_model_limits(data):
+SESSION_HORIZON_SECONDS = 12 * 3600
+_KINDS = (("Session", "Session (5-hour)"), ("Weekly", "Weekly (7-day)"))
+
+
+def gemini_model_limits(data, now=None):
+  """Per-model quota fallback. Classify by reset horizon: <=12h Session, else Weekly."""
+  now = now or datetime.now(timezone.utc)
   models = data.get("models") if isinstance(data, dict) else None
-  best = None
+  best = {}
   for key, model in (models.items() if isinstance(models, dict) else []):
     info = model.get("quotaInfo") if isinstance(model, dict) else None
     if not isinstance(info, dict) or "gemini" not in key.lower() or not reset_of(info):
       continue
     spent = used(info)
-    if spent is not None and (best is None or spent > best[0]):
-      best = (spent, reset_of(info))
-  if not best:
-    return []
-  return [{"label": "Weekly (7-day)", "title": "Weekly", "percent": best[0], "resetsAt": best[1]}]
+    if spent is None:
+      continue
+    resets = reset_of(info)
+    when = parse_time(resets)
+    kind = "Session" if when and (when - now).total_seconds() <= SESSION_HORIZON_SECONDS else "Weekly"
+    if kind not in best or spent > best[kind][0]:
+      best[kind] = (spent, resets)
+  return [
+    {"label": label, "title": kind, "percent": best[kind][0], "resetsAt": best[kind][1]}
+    for kind, label in _KINDS if kind in best
+  ]
+
+
+_QUOTA_PERCENT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*%")
+_QUOTA_TIME_RE = re.compile(
+  r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:\s*(?:Z|UTC|GMT|BST|[+-]\d{2}:?\d{2})\b|Z\b)?",
+  re.IGNORECASE,
+)
+
+
+def parse_agy_quota_output(text, models_limits=()):
+  """Pure parser for `agy -p /quota` output (tabular or single-space/ISO variants)."""
+  found = {}
+  for line in str(text or "").splitlines():
+    low = line.lower()
+    if "gemini" not in low or "claude" in low or "gpt" in low:
+      continue
+    kind = "Session" if ("five" in low or "5 hour" in low or "5-hour" in low or "5h" in low) else ("Weekly" if "week" in low else None)
+    percent = _QUOTA_PERCENT_RE.search(line)
+    stamp = _QUOTA_TIME_RE.search(line, percent.end()) if percent else None
+    when = parse_time(stamp.group(0).strip()) if stamp else None
+    if not kind or not percent or not when or when.year < 2000:
+      continue
+    found[kind] = (round(max(0.0, min(1.0, 1.0 - float(percent.group(1)) / 100.0)), 4), when)
+  limits = []
+  for kind, label in _KINDS:
+    if kind not in found:
+      continue
+    percent, when = found[kind]
+    resets = format_utc_iso(when)
+    for fine in models_limits or ():
+      fine_dt = parse_time(fine.get("resetsAt"))
+      if fine_dt and abs((fine_dt - when).total_seconds()) < 120:
+        percent = fine["percent"]
+        resets = fine["resetsAt"]
+    limits.append({"label": label, "title": kind, "percent": percent, "resetsAt": resets})
+  return limits
+
+
+def agy_env():
+  env = {k: v for k, v in os.environ.items() if not k.startswith(("DYLD_", "LD_"))}
+  extra = ["/opt/homebrew/bin", "/usr/local/bin", str(home_dir() / ".local" / "bin")]
+  existing = [p for p in env.get("PATH", "").split(":") if p]
+  env["PATH"] = ":".join(extra + [p for p in existing if p not in extra] + [p for p in ("/usr/bin", "/bin") if p not in existing])
+  env["HOME"] = str(home_dir())
+  env.setdefault("TERM", "dumb")
+  env["NO_COLOR"] = "1"
+  return env
 
 
 def agy_quota_limits(models_limits):
   agy = find_agy()
   if not agy:
     return []
-  try:
-    text = subprocess.run(
-      [agy, "-p", "/quota"],
-      stdin=subprocess.DEVNULL,
-      capture_output=True,
-      text=True,
-      timeout=20,
-      check=True,
-    ).stdout
-  except subprocess.TimeoutExpired:
-    QUOTA_ERROR[0] = "agy /quota timed out."
-    return []
-  except subprocess.CalledProcessError as err:
-    QUOTA_ERROR[0] = f"agy /quota failed (exit {err.returncode})."
-    return []
-  except (OSError, subprocess.SubprocessError):
-    QUOTA_ERROR[0] = "agy /quota could not run."
-    return []
-  found = {}
-  for line in text.splitlines():
-    cols = [c.strip() for c in re.split(r"\t+|\s{2,}", line.strip()) if c.strip()]
-    if len(cols) < 4 or "gemini" not in cols[0].lower():
-      continue
-    match = re.match(r"(\d+(?:\.\d+)?)%", cols[2])
-    when = parse_time(cols[3])
-    if not match or not when or when.year < 2000:
-      continue
-    kind = "Session" if "five" in cols[1].lower() else ("Weekly" if "week" in cols[1].lower() else None)
-    if kind:
-      found[kind] = (round(max(0.0, min(1.0, 1.0 - float(match.group(1)) / 100.0)), 4), when)
-  limits = []
-  for kind, label in (("Session", "Session (5-hour)"), ("Weekly", "Weekly (7-day)")):
-    if kind in found:
-      percent, when = found[kind]
-      resets = format_utc_iso(when)
-      if kind == "Session":
-        for fine in models_limits:
-          fine_dt = parse_time(fine.get("resetsAt"))
-          if fine.get("resetsAt") == resets or (fine_dt and abs((fine_dt - when).total_seconds()) < 120):
-            percent = fine["percent"]
-            if fine.get("resetsAt"):
-              resets = fine["resetsAt"]
-      limits.append({"label": label, "title": kind, "percent": percent, "resetsAt": resets})
-  return limits
+  text = None
+  for attempt in range(2):
+    try:
+      text = subprocess.run(
+        [agy, "-p", "/quota"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=45,
+        check=True,
+        env=agy_env(),
+      ).stdout
+      if parse_agy_quota_output(text, models_limits):
+        break
+    except subprocess.TimeoutExpired:
+      QUOTA_ERROR[0] = "agy /quota timed out."
+    except subprocess.CalledProcessError as err:
+      QUOTA_ERROR[0] = f"agy /quota failed (exit {err.returncode})."
+    except (OSError, subprocess.SubprocessError):
+      QUOTA_ERROR[0] = "agy /quota could not run."
+      break
+    if attempt == 0:
+      time.sleep(1)
+  return parse_agy_quota_output(text, models_limits) if text else []
 
 
 def post(endpoint, token, body=None):
