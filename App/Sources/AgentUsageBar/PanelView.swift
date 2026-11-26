@@ -47,7 +47,9 @@ struct ProviderSwitcher: View {
                 Button { store.selectedId = p.id } label: {
                     HStack(spacing: 5) {
                         ProviderIcon.image(for: p.id, fallback: "sparkles").frame(width: 14, height: 14)
-                        if let pct {
+                        if p.ready == false {
+                            Text("–").font(.subheadline).foregroundStyle(.secondary)
+                        } else if let pct {
                             Text("\(Int((pct * 100).rounded()))%").font(.subheadline.monospacedDigit())
                                 .foregroundStyle(pct >= 0.9 ? Color.red : (on ? Color.primary : Color.secondary))
                         }
@@ -76,6 +78,13 @@ struct ProviderSection: View {
         }
     }
 
+    private var notReadyText: String {
+        for t in [provider.authHelpText, provider.usageStatusText] {
+            if let t, !t.trimmingCharacters(in: .whitespaces).isEmpty { return t }
+        }
+        return "Couldn't read usage yet. Press Refresh; if it persists, run the collector with --print in Terminal to see why."
+    }
+
     @ViewBuilder
     private func content(now: Date) -> some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -84,18 +93,18 @@ struct ProviderSection: View {
                     .frame(width: 16, height: 16)
                 Text(provider.displayName).font(.headline)
                 Spacer()
-                Text(provider.plan.isEmpty ? "Subscription" : provider.plan)
-                    .font(.caption).foregroundStyle(.secondary)
+                if !provider.plan.isEmpty {
+                    Text(provider.plan).font(.caption).foregroundStyle(.secondary)
+                }
             }
 
-            if let status = provider.usageStatusText, !status.isEmpty {
+            if provider.ready == false {
+                Note(text: notReadyText, tint: .secondary)
+            } else if let status = provider.usageStatusText, !status.isEmpty {
                 Note(text: [status, provider.authHelpText ?? ""].filter { !$0.isEmpty }.joined(separator: " — "), tint: .red)
             }
             if provider.limitsStale == true, !(provider.limits ?? []).isEmpty {
                 Note(text: "Showing the last known limits; couldn't refresh just now.", tint: .orange)
-            }
-            if provider.ready == false {
-                Note(text: "Not ready yet.", tint: .secondary)
             }
 
             if let b = provider.balance, let remaining = b.remaining {
@@ -209,6 +218,7 @@ struct Note: View {
     let tint: Color
     var body: some View {
         Text(text).font(.caption).foregroundStyle(tint == .secondary ? Color.secondary : tint)
+            .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
             .padding(8).frame(maxWidth: .infinity, alignment: .leading)
             .background(tint.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))

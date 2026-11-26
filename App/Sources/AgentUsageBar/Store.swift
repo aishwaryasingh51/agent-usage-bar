@@ -64,10 +64,15 @@ final class Store: ObservableObject {
 
     // MARK: Menu bar summary
 
-    var topPercent: Double? { providers.compactMap { $0.maxPercent(now: now) }.max() }
-    /// Provider whose window is the fullest: its icon labels the menu bar.
+    /// Ready providers; all providers only when none are ready.
+    private var candidates: [Provider] {
+        let ready = providers.filter { $0.ready != false }
+        return ready.isEmpty ? providers : ready
+    }
+    var topPercent: Double? { candidates.compactMap { $0.maxPercent(now: now) }.max() }
+    /// Ready provider whose window is the fullest: its icon labels the menu bar.
     var topProviderId: String? {
-        providers.max { ($0.maxPercent(now: now) ?? -1) < ($1.maxPercent(now: now) ?? -1) }?.id
+        candidates.max { ($0.maxPercent(now: now) ?? -1) < ($1.maxPercent(now: now) ?? -1) }?.id
     }
     var balanceAlarming: Bool { providers.contains { $0.balance?.alarming == true } }
     var alarming: Bool { (topPercent ?? 0) >= 0.9 || balanceAlarming }
