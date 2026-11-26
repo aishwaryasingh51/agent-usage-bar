@@ -14,6 +14,7 @@ summary omits the Gemini group. Never prints or logs tokens.
 
 import argparse
 import base64
+import glob
 import hashlib
 import json
 import math
@@ -71,6 +72,52 @@ def find_binary(name):
   ):
     if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
       return candidate
+  return None
+
+
+SIGN_IN_HELP = "Sign in to Antigravity: open Terminal and run agy once."
+EXPIRED_HELP = "Sign in to Antigravity again: open Terminal and run agy."
+_AGY_CACHE = []
+QUOTA_ERROR = [""]
+
+
+def _executable(path):
+  return bool(path) and os.path.isfile(path) and os.access(path, os.X_OK)
+
+
+def find_agy():
+  if _AGY_CACHE:
+    return _AGY_CACHE[0]
+  _AGY_CACHE.append(_find_agy())
+  return _AGY_CACHE[0]
+
+
+def _find_agy():
+  override = os.environ.get("AGY_BIN")
+  if override is not None:
+    return override if override and _executable(override) else None
+  home = home_dir()
+  found = shutil.which("agy")
+  candidates = [found] if found else []
+  candidates += ["/opt/homebrew/bin/agy", "/usr/local/bin/agy", str(home / ".local" / "bin" / "agy")]
+  candidates += sorted(glob.glob(str(home / ".antigravity*" / "bin" / "agy")))
+  candidates += [
+    str(home / ".gemini" / "antigravity" / "bin" / "agy"),
+    "/Applications/Antigravity.app/Contents/Resources/app/bin/agy",
+  ]
+  for candidate in candidates:
+    if _executable(candidate):
+      return candidate
+  try:
+    out = subprocess.run(
+      ["/bin/zsh", "-lc", "command -v agy"],
+      stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3,
+    ).stdout
+    lines = [l.strip() for l in out.splitlines() if l.strip()]
+    if lines and _executable(lines[-1]):
+      return lines[-1]
+  except (OSError, subprocess.SubprocessError):
+    pass
   return None
 
 
@@ -732,7 +779,7 @@ def gemini_model_limits(data):
 
 
 def agy_quota_limits(models_limits):
-  agy = find_binary("agy")
+  agy = find_agy()
   if not agy:
     return []
   try:
@@ -744,7 +791,14 @@ def agy_quota_limits(models_limits):
       timeout=20,
       check=True,
     ).stdout
+  except subprocess.TimeoutExpired:
+    QUOTA_ERROR[0] = "agy /quota timed out."
+    return []
+  except subprocess.CalledProcessError as err:
+    QUOTA_ERROR[0] = f"agy /quota failed (exit {err.returncode})."
+    return []
   except (OSError, subprocess.SubprocessError):
+    QUOTA_ERROR[0] = "agy /quota could not run."
     return []
   found = {}
   for line in text.splitlines():
@@ -828,7 +882,7 @@ def collect_limits(entries, force):
 
   keep(lead)
   if not lead or not lead["accessToken"]:
-    result.update(usageStatusText="Waiting for auth", authHelpText=AUTH_HELP)
+    result.update(usageStatusText="Not signed in", authHelpText=SIGN_IN_HELP)
     return result
 
   if not force:
@@ -882,7 +936,7 @@ def collect_limits(entries, force):
 
   if refused:
     keep(refused[0])
-    result.update(usageStatusText="Sign-in expired", authHelpText=refused_help(refused[0]))
+    result.update(usageStatusText="Sign-in expired", authHelpText=EXPIRED_HELP)
     return result
 
   result.update(usageStatusText="Limits paused" if lead["refresh"] else "Sign-in expired", authHelpText=lapsed_help(lead, result["limits"]))
@@ -1120,13 +1174,31 @@ def main():
   parser.add_argument("--print", action="store_true")
   args = parser.parse_args()
 
+  to_file = not (getattr(args, "print") or not args.write)
+  if not find_agy():
+    if to_file:
+      try:
+        (usage_dir() / "agy.json").unlink()
+      except FileNotFoundError:
+        pass
+      except OSError:
+        pass
+    return
+
   stats = cached_local_stats(app_root(), scan_max_age(args.force, args.limits_only))
   entries = logins()
-  ready = bool(entries) or bool(stats.get("hasLocalStats"))
-  limits = collect_limits(entries, args.force) if ready else {
-    "limits": [], "tierLabel": "", "usageStatusText": "", "authHelpText": "", "live": False, "fetchedAtMs": 0, "retryAdvised": False,
+  limits = collect_limits(entries, args.force) if entries else {
+    "limits": [], "tierLabel": "", "usageStatusText": "Not signed in", "authHelpText": SIGN_IN_HELP,
+    "live": False, "fetchedAtMs": 0, "retryAdvised": False,
   }
+  if not entries:
+    quota = agy_quota_limits([])
+    if quota:
+      limits.update(limits=quota, live=True, usageStatusText="", authHelpText="", fetchedAtMs=now_ms())
+  ready = bool(limits["limits"]) or bool(stats.get("hasLocalStats"))
   tier = limits["tierLabel"]
+  if tier == "Subscription":
+    tier = ""
   agy = next((e for e in entries if e["source"] == "agy"), None)
   if not tier and agy and agy["authMethod"] == "enterprise":
     tier = "Enterprise"
@@ -1146,8 +1218,11 @@ def main():
     retryAdvised=limits["retryAdvised"],
   )
   record.update(stats)
+  if not record["ready"] and not record["usageStatusText"] and not record["authHelpText"]:
+    record["usageStatusText"] = "Antigravity not ready"
+    record["authHelpText"] = SIGN_IN_HELP
 
-  if getattr(args, "print") or not args.write:
+  if not to_file:
     emit(record)
     return
 
