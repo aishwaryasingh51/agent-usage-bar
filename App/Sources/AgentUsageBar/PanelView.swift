@@ -32,61 +32,6 @@ struct PanelView: View {
         }
         .padding(16)
         .frame(width: 380)
-        // Hug the content: the window must size to it (and shrink on tab switch), never keep a taller size.
-        .fixedSize(horizontal: true, vertical: true)
-        .background(GeometryReader { g in Color.clear.preference(key: ContentHeightKey.self, value: g.size.height) })
-        .onPreferenceChange(ContentHeightKey.self) { WindowFitter.shared.contentHeight = $0 }
-        .background(WindowAccessor())
-        // Top-aligned so a taller-than-content window never shows a band above the panel.
-        .frame(maxHeight: .infinity, alignment: .top)
-    }
-}
-
-struct ContentHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
-}
-
-/// MenuBarExtra(.window) grows its NSWindow with content but never shrinks it. This resizes the
-/// window to the measured content height, keeping the top edge fixed.
-@MainActor
-final class WindowFitter {
-    static let shared = WindowFitter()
-    static let logging = CommandLine.arguments.contains("--log-window")
-    weak var window: NSWindow?
-    var contentHeight: CGFloat = 0 { didSet { if contentHeight != oldValue { schedule() } } }
-
-    func schedule() {
-        DispatchQueue.main.async { self.fit() }
-    }
-
-    func fit() {
-        guard let w = window, contentHeight > 1 else { return }
-        let target = w.frameRect(forContentRect: NSRect(x: 0, y: 0, width: w.contentLayoutRect.width, height: contentHeight)).height
-        if abs(w.frame.height - target) > 0.5 {
-            var f = w.frame
-            f.origin.y += f.height - target
-            f.size.height = target
-            w.setFrame(f, display: true, animate: false)
-        }
-        if Self.logging {
-            FileHandle.standardError.write(Data(String(format: "window-height=%.1f content-height=%.1f match=%@\n",
-                w.contentLayoutRect.height, contentHeight, abs(w.contentLayoutRect.height - contentHeight) < 1 ? "yes" : "NO").utf8))
-        }
-    }
-}
-
-struct WindowAccessor: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        let v = NSView()
-        DispatchQueue.main.async { WindowFitter.shared.window = v.window; WindowFitter.shared.schedule() }
-        return v
-    }
-    func updateNSView(_ v: NSView, context: Context) {
-        DispatchQueue.main.async {
-            if WindowFitter.shared.window !== v.window { WindowFitter.shared.window = v.window }
-            WindowFitter.shared.schedule()
-        }
     }
 }
 

@@ -1,9 +1,10 @@
 import SwiftUI
 import AppKit
+import Combine
 
 @main
 struct AgentUsageBarApp: App {
-    @StateObject private var store = Store()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     init() {
         // Debug aid: `AgentUsageBar --snapshot <dir>` renders the popover and bar label to PNGs, then exits.
@@ -30,13 +31,104 @@ struct AgentUsageBarApp: App {
         }
     }
 
+    // The status item and popover live in AppDelegate (AppKit); SwiftUI only needs a scene.
     var body: some Scene {
-        MenuBarExtra {
-            PanelView().environmentObject(store)
-        } label: {
-            MenuLabel(items: store.labelItems)
+        Settings { EmptyView() }
+    }
+}
+
+struct PanelRoot: View {
+    @ObservedObject var store: Store
+    var body: some View { PanelView().environmentObject(store) }
+}
+
+/// NSStatusItem + NSPopover: the popover tracks the SwiftUI ideal size both ways (grow and shrink).
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let store = Store()
+    private var statusItem: NSStatusItem!
+    private var popover: NSPopover!
+    private var host: NSHostingController<PanelRoot>!
+    private var cancellables = Set<AnyCancellable>()
+    private var appearanceObs: NSKeyValueObservation?
+    private var lastItems: [LabelItem]?
+    private let logging = CommandLine.arguments.contains("--log-window")
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+
+        host = NSHostingController(rootView: PanelRoot(store: store))
+        host.sizingOptions = [.preferredContentSize]
+        popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentViewController = host
+
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        if let b = statusItem.button {
+            b.target = self
+            b.action = #selector(toggle(_:))
+            b.imagePosition = .imageOnly
+            appearanceObs = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
+                DispatchQueue.main.async { MainActor.assumeIsolated { self?.updateLabel(force: true) } }
+            }
         }
-        .menuBarExtraStyle(.window)
+        updateLabel(force: true)
+
+        store.objectWillChange.sink { [weak self] _ in
+            // objectWillChange fires before the value lands; look again on the next turn.
+            DispatchQueue.main.async { MainActor.assumeIsolated {
+                self?.updateLabel(force: false)
+                self?.logSizes("data-change")
+            } }
+        }.store(in: &cancellables)
+
+        if CommandLine.arguments.contains("--open-popover-on-launch") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { MainActor.assumeIsolated {
+                self.show()
+                if self.logging { self.cycleTabs() }
+            } }
+        }
+    }
+
+    private func updateLabel(force: Bool) {
+        let items = store.labelItems
+        guard force || items != lastItems else { return }
+        lastItems = items
+        statusItem.button?.image = MenuLabel(items: items).render()
+    }
+
+    @objc private func toggle(_ sender: Any?) {
+        if popover.isShown { popover.performClose(sender) } else { show() }
+    }
+
+    private func show() {
+        guard let b = statusItem.button, !popover.isShown else { return }
+        popover.show(relativeTo: b.bounds, of: b, preferredEdge: .minY)
+        NSApp.activate(ignoringOtherApps: true)
+        logSizes("open")
+    }
+
+    /// Debug: step through the provider tabs so shrink/grow can be seen in the log.
+    private func cycleTabs() {
+        let ids = store.providers.map(\.id)
+        for (n, id) in (ids + [ids.first].compactMap { $0 }).enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8 * Double(n + 1)) { MainActor.assumeIsolated {
+                self.store.selectedId = id
+                self.logSizes("tab-switch(\(id))", delay: 0.3)
+            } }
+        }
+    }
+
+    private func logSizes(_ why: String, delay: Double = 0.3) {
+        guard logging, popover.isShown else { return }
+        // Let SwiftUI lay out and the popover pick up the new preferred size first.
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { MainActor.assumeIsolated {
+            guard self.popover.isShown else { return }
+            let p = self.popover.contentSize.height
+            let c = self.host.view.fittingSize.height
+            FileHandle.standardError.write(Data(String(format: "[%@] popover-height=%.1f content-height=%.1f match=%@\n",
+                why, p, c, abs(p - c) < 1 ? "yes" : "NO").utf8))
+        } }
     }
 }
 
@@ -58,7 +150,7 @@ struct MenuLabel: View {
         Image(nsImage: render())
     }
 
-    private func render() -> NSImage {
+    func render() -> NSImage {
         let anyRed = items.contains { $0.alarming }
         let isDark = dark ?? (NSApp?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
         let ink: Color = anyRed ? (isDark ? .white : .black) : .black
