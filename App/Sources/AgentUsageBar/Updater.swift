@@ -88,13 +88,41 @@ enum CheckoutGuard {
     }
 }
 
+// MARK: - Test hooks (compiled out of normal builds)
+
+/// Environment variables and command-line flags that redirect the updater exist only in builds made with
+/// `AUB_TEST_BUILD=1 ./build.sh` (Swift flag AUB_TEST_HOOKS). A normal build contains none of this code.
+enum TestHooks {
+    static let enabled: Bool = {
+        #if AUB_TEST_HOOKS
+        return true
+        #else
+        return false
+        #endif
+    }()
+    static func env(_ name: String) -> String? {
+        #if AUB_TEST_HOOKS
+        let v = ProcessInfo.processInfo.environment[name] ?? ""
+        return v.isEmpty ? nil : v
+        #else
+        return nil
+        #endif
+    }
+    static func arg(_ name: String) -> String? {
+        #if AUB_TEST_HOOKS
+        return Updater.arg(name)
+        #else
+        return nil
+        #endif
+    }
+}
+
 // MARK: - Paths and log
 
 enum UpdatePaths {
-    /// AUB_SUPPORT_DIR overrides the location (tests only), keeping logs inside it too.
+    /// AUB_SUPPORT_DIR overrides the location (test builds only), keeping logs inside it too.
     static var override: String? {
-        let v = ProcessInfo.processInfo.environment["AUB_SUPPORT_DIR"] ?? ""
-        return v.isEmpty ? nil : (v as NSString).expandingTildeInPath
+        TestHooks.env("AUB_SUPPORT_DIR").map { ($0 as NSString).expandingTildeInPath }
     }
     static var support: URL {
         if let o = override { return URL(fileURLWithPath: o) }
@@ -108,6 +136,10 @@ enum UpdatePaths {
     static var checkout: URL { support.appendingPathComponent("src") }
     static var staging: URL { support.appendingPathComponent("staging") }
     static var helper: URL { support.appendingPathComponent("aub-swap.sh") }
+    /// The replaced app is kept here, outside the Applications folder.
+    static var backupDir: URL { support.appendingPathComponent("previous") }
+    static var backupApp: URL { backupDir.appendingPathComponent("AgentUsageBar.app") }
+    static var lockDir: URL { support.appendingPathComponent("update.lock") }
     static var displayLog: String { (logFile.path as NSString).abbreviatingWithTildeInPath }
 }
 
@@ -202,11 +234,12 @@ enum Shell {
 
         var st: Int32 = 0
         var timedOut = false
+        var waitFailed = false
         let deadline = Date().addingTimeInterval(timeout)
         while true {
             let r = waitpid(pid, &st, WNOHANG)
             if r == pid { break }
-            if r < 0 { st = 0; break }
+            if r < 0 { waitFailed = true; UpdateLog.write("waitpid failed: \(String(cString: strerror(errno)))"); break }
             if Date() >= deadline {
                 timedOut = true
                 kill(-pid, SIGTERM)
@@ -219,7 +252,8 @@ enum Shell {
         // A stray grandchild could hold the pipe open; don't wait for it forever.
         _ = readerDone.wait(timeout: .now() + 5)
         let sig = st & 0x7f
-        let status: Int32 = sig == 0 ? (st >> 8) & 0xff : 128 + sig
+        // If we could not learn how the child ended, that is a failure, never a success.
+        let status: Int32 = waitFailed ? -1 : (sig == 0 ? (st >> 8) & 0xff : 128 + sig)
         if timedOut { UpdateLog.write("timed out after \(Int(timeout))s") }
         UpdateLog.write("exit status \(status)")
         return RunResult(status: status, output: box.string, timedOut: timedOut)
@@ -231,6 +265,7 @@ enum Shell {
 enum Updater {
     static let defaultSlug = "aishwaryasingh51/agent-usage-bar"
     static let selfTestCount = versionCases.count + tagCases.count + locationCases.count + remoteCases.count + refusalCases.count + slugCases.count
+        + backupCases.count + 2
 
     static func arg(_ name: String) -> String? {
         let a = CommandLine.arguments
@@ -240,14 +275,13 @@ enum Updater {
 
     /// The version this process believes it is (--fake-version is a test hook).
     static var currentVersion: String {
-        if let f = arg("--fake-version"), SemVer.parse(f) != nil { return f }
+        if let f = TestHooks.arg("--fake-version"), SemVer.parse(f) != nil { return f }
         return appVersion
     }
 
-    /// Repo slug: env AUB_UPDATE_REPO (tests), else the Info.plist key written by build.sh, else the upstream repo.
+    /// Repo slug: env AUB_UPDATE_REPO (test builds only), else the Info.plist key written by build.sh, else the upstream repo.
     static var slug: String {
-        let env = ProcessInfo.processInfo.environment["AUB_UPDATE_REPO"] ?? ""
-        if UpdateTag.isValidSlug(env) { return env }
+        if let env = TestHooks.env("AUB_UPDATE_REPO"), UpdateTag.isValidSlug(env) { return env }
         if let p = Bundle.main.object(forInfoDictionaryKey: "AUBUpdateRepo") as? String, UpdateTag.isValidSlug(p) { return p }
         return defaultSlug
     }
@@ -296,15 +330,26 @@ enum Updater {
         let src = ProcessInfo.processInfo.environment
         var e: [String: String] = [
             "PATH": cleanPath,
-            "HOME": NSHomeDirectory(),
+            "HOME": TestHooks.env("HOME") ?? NSHomeDirectory(),   // test builds: lets a test point git at a hostile HOME
             "USER": src["USER"] ?? NSUserName(),
             "TMPDIR": NSTemporaryDirectory(),
             "LANG": "en_US.UTF-8",
+            // Hermetic git: the user's global/system git config (url rewrites, hooks, fsmonitor,
+            // credential helpers) must never influence the managed checkout.
+            "GIT_CONFIG_GLOBAL": "/dev/null",
+            "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_TERMINAL_PROMPT": "0",
+            "GIT_ASKPASS": "",
+            "GIT_ALLOW_PROTOCOL": TestHooks.enabled ? "https:file" : "https",
         ]
         if let d = src["DEVELOPER_DIR"] { e["DEVELOPER_DIR"] = d }
         return e
     }
+
+    /// Options put in front of every git command, on top of the hermetic environment.
+    static let gitOptions = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "credential.helper=",
+                             "-c", "protocol.allow=never", "-c", "protocol.https.allow=always"]
+    static var gitProtocolOptions: [String] { TestHooks.enabled ? ["-c", "protocol.file.allow=always"] : [] }
 
     static let toolsMessage = "Install Xcode Command Line Tools (xcode-select --install) to update in-app."
 
@@ -322,8 +367,21 @@ enum Updater {
         return path
     }
 
+    static let backupMessage = "This is the backup copy. Open AgentUsageBar.app to update."
+
+    /// True when the bundle at `bundle` is the saved backup (inside <support>/previous) or is named like one.
+    /// Updating from it would replace the very app that is running.
+    static func isBackupCopy(bundle: String, backupDir: String) -> Bool {
+        let b = URL(fileURLWithPath: bundle).standardizedFileURL
+        if b.lastPathComponent.hasSuffix(".previous.app") { return true }
+        let dir = URL(fileURLWithPath: backupDir).standardizedFileURL.path
+        return b.deletingLastPathComponent().path == dir
+    }
+    static var runningFromBackup: Bool { isBackupCopy(bundle: Bundle.main.bundleURL.path, backupDir: UpdatePaths.backupDir.path) }
+
     /// Why in-app updating is unavailable on this Mac (nil = available). Blocking: call off the main thread.
     static func prerequisiteProblem() -> String? {
+        if runningFromBackup { return backupMessage }
         if gitPath() == nil { return toolsMessage }
         let bundle = Bundle.main.bundleURL
         guard bundle.pathExtension == "app" else { return "Updating in-app needs the installed app (built with build.sh)." }
@@ -336,8 +394,9 @@ enum Updater {
     // MARK: Prepare (checkout + build + verify)
 
     /// Steps 3 and 4 of the design. Returns the verified staged .app. Never touches the installed app.
-    static func prepare(tag: String, source: String?, progress: @escaping (String) -> Void) throws -> URL {
+    static func prepare(tag: String, source: String?, expectedCommit: String? = nil, progress: @escaping (String) -> Void) throws -> URL {
         guard UpdateTag.isValid(tag) else { throw UpdateError("Refusing unexpected tag name.") }
+        guard !runningFromBackup else { throw UpdateError(backupMessage) }
         UpdateLog.rotateIfLarge()
         UpdateLog.write("=== update to \(tag) (current \(currentVersion), source \(source ?? "github.com/\(slug)")) ===")
         guard let gitBin = gitPath() else { throw UpdateError(toolsMessage) }
@@ -360,17 +419,19 @@ enum Updater {
 
         let src = UpdatePaths.checkout
         let env = baseEnv()
+        let opts = gitOptions + gitProtocolOptions
         func git(_ args: [String], timeout: TimeInterval = 60, tee: Bool = true) -> RunResult {
-            Shell.run(gitBin, args, cwd: fm.fileExists(atPath: src.path) ? src.path : nil, env: env, timeout: timeout, tee: tee)
+            Shell.run(gitBin, opts + args, cwd: fm.fileExists(atPath: src.path) ? src.path : nil, env: env, timeout: timeout, tee: tee)
         }
 
         progress("Downloading source…")
         if !fm.fileExists(atPath: src.appendingPathComponent(".git").path) {
             if fm.fileExists(atPath: src.path) { throw UpdateError("\(src.path) exists but is not a git checkout. Delete it and try again.") }
-            let r = Shell.run(gitBin, ["clone", "--quiet", "--", expected, src.path], env: env, timeout: 300)
+            let r = Shell.run(gitBin, opts + ["clone", "--quiet", "--", expected, src.path], env: env, timeout: 300)
             guard r.ok else { throw UpdateError("Could not download the source: " + lastLine(r.output)) }
         } else {
-            let remote = git(["remote", "get-url", "origin"], tee: false)
+            // The raw configured URL (`remote get-url` would apply url.*.insteadOf rewrites).
+            let remote = git(["config", "--get", "remote.origin.url"], tee: false)
             guard remote.ok else { throw UpdateError("Could not read the update checkout's remote.") }
             // build.sh regenerates this tracked file; put it back so it doesn't count as a local change.
             _ = git(["checkout", "--quiet", "--", "App/Sources/AgentUsageBar/Version.swift"], tee: false)
@@ -389,12 +450,14 @@ enum Updater {
         guard co.ok else { throw UpdateError("Could not check out \(tag): " + lastLine(co.output)) }
         let head = git(["rev-parse", "HEAD"], tee: false).output.trimmingCharacters(in: .whitespacesAndNewlines)
         guard head == wantCommit else { throw UpdateError("Checked-out commit does not match tag \(tag).") }
+        if let e = expectedCommit, !e.isEmpty, e != head {
+            throw UpdateError("Tag \(tag) now points at a different commit than the one you confirmed (\(e.prefix(7)) vs \(head.prefix(7))). Nothing was installed.")
+        }
         UpdateLog.write("checked out \(tag) = \(head)")
 
         // Build into a fresh staging folder.
         progress("Building \(tag) (a few minutes)…")
-        try? fm.removeItem(at: UpdatePaths.staging)
-        try fm.createDirectory(at: UpdatePaths.staging, withIntermediateDirectories: true)
+        try resetStaging()
         var benv = baseEnv()
         benv["INSTALL_DIR"] = UpdatePaths.staging.path
         benv["AUB_UPDATE_REPO"] = slug
@@ -422,6 +485,101 @@ enum Updater {
         return staged
     }
 
+    // MARK: Staging, lock, commit lookup
+
+    private static let stagingMarker = ".aub-staging"
+
+    /// Empties <support>/staging. Only ever deletes that exact folder, and only when it carries the
+    /// marker the updater itself wrote there (never a folder somebody else put at that path).
+    static func resetStaging() throws {
+        let fm = FileManager.default
+        let dir = UpdatePaths.staging
+        if let attrs = try? fm.attributesOfItem(atPath: dir.path) {
+            guard attrs[.type] as? FileAttributeType == .typeDirectory,
+                  fm.fileExists(atPath: dir.appendingPathComponent(stagingMarker).path) else {
+                throw UpdateError("\(dir.path) was not created by the updater, so it was left alone. Move or delete it and try again.")
+            }
+            try fm.removeItem(at: dir)
+        }
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        guard fm.createFile(atPath: dir.appendingPathComponent(stagingMarker).path, contents: Data()) else {
+            throw UpdateError("Could not prepare the staging folder.")
+        }
+    }
+
+    /// One update at a time: a lock folder holding our pid. A lock whose process is gone is stale and is cleared.
+    static func acquireLock() throws {
+        let fm = FileManager.default
+        try fm.createDirectory(at: UpdatePaths.support, withIntermediateDirectories: true)
+        let pidFile = UpdatePaths.lockDir.appendingPathComponent("pid")
+        for _ in 0..<2 {
+            if mkdir(UpdatePaths.lockDir.path, 0o755) == 0 {
+                try Data("\(getpid())\n".utf8).write(to: pidFile)
+                return
+            }
+            let other = (try? String(contentsOf: pidFile, encoding: .utf8)).flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            if let o = other, o > 0, o != getpid(), kill(o, 0) == 0 || errno == EPERM {
+                throw UpdateError("Another update is already running (process \(o)).")
+            }
+            UpdateLog.write("clearing stale update lock (pid \(other.map(String.init) ?? "unknown"))")
+            try? fm.removeItem(at: pidFile)
+            rmdir(UpdatePaths.lockDir.path)
+        }
+        throw UpdateError("Could not take the update lock at \(UpdatePaths.lockDir.path).")
+    }
+
+    static func releaseLock() {
+        try? FileManager.default.removeItem(at: UpdatePaths.lockDir.appendingPathComponent("pid"))
+        rmdir(UpdatePaths.lockDir.path)
+    }
+
+    /// The commit that `tag` points at on the remote (peeled for annotated tags), found without downloading anything.
+    static func resolveTagCommit(tag: String, source: String? = nil) throws -> String {
+        guard UpdateTag.isValid(tag) else { throw UpdateError("Refusing unexpected tag name.") }
+        guard let gitBin = gitPath() else { throw UpdateError(toolsMessage) }
+        let remote = source.map { $0.hasPrefix("https://") ? $0 : ($0 as NSString).expandingTildeInPath } ?? "https://github.com/\(slug).git"
+        let r = Shell.run(gitBin, gitOptions + gitProtocolOptions + ["ls-remote", "--", remote, "refs/tags/\(tag)", "refs/tags/\(tag)^{}"],
+                          env: baseEnv(), timeout: 60, tee: false)
+        guard r.ok else { throw UpdateError("Could not look up \(tag) on GitHub: " + lastLine(r.output)) }
+        var direct: String?, peeled: String?
+        for line in r.output.split(whereSeparator: \.isNewline) {
+            let f = line.split(whereSeparator: { $0 == "\t" || $0 == " " })
+            guard f.count == 2, f[0].count == 40, f[0].utf8.allSatisfy({ ($0 >= 48 && $0 <= 57) || ($0 >= 97 && $0 <= 102) }) else { continue }
+            if f[1] == "refs/tags/\(tag)^{}" { peeled = String(f[0]) } else if f[1] == "refs/tags/\(tag)" { direct = String(f[0]) }
+        }
+        guard let c = peeled ?? direct else { throw UpdateError("Tag \(tag) was not found on GitHub.") }
+        return c
+    }
+
+    /// After an update, the new app drops the build cache of the managed checkout (hundreds of MB).
+    static func cleanBuildCache() {
+        let fm = FileManager.default
+        let src = UpdatePaths.checkout
+        guard fm.fileExists(atPath: src.appendingPathComponent(".git").path) else { return }   // only inside our own checkout
+        for sub in ["App/.build", ".build"] {
+            let d = src.appendingPathComponent(sub)
+            if fm.fileExists(atPath: d.path) { try? fm.removeItem(at: d); UpdateLog.write("removed build cache \(d.path)") }
+        }
+    }
+
+    /// Whole update: lock, prepare, hand over to the swap helper. On success the lock stays (stale once the app quits).
+    static func perform(tag: String, expectedCommit: String?, progress: @escaping (String) -> Void) throws {
+        try acquireLock()
+        do {
+            let staged = try prepare(tag: tag, source: nil, expectedCommit: expectedCommit, progress: progress)
+            progress("Restarting…")
+            try launchSwap(staged: staged)
+        } catch { releaseLock(); throw error }
+    }
+
+    /// Short text for a failed update check; the technical detail goes to the log.
+    static func friendlyCheckError(_ error: Error) -> String {
+        if error is URLError { return "Couldn't reach GitHub. Check your connection." }
+        let ns = error as NSError
+        if ns.domain == NSURLErrorDomain { return "Couldn't reach GitHub. Check your connection." }
+        return "Couldn't check: \(error)"
+    }
+
     static func lastLine(_ s: String) -> String {
         s.split(whereSeparator: \.isNewline).last.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? "(no output)"
     }
@@ -432,12 +590,19 @@ enum Updater {
     static func launchSwap(staged: URL) throws {
         let installed = Bundle.main.bundleURL
         guard installed.pathExtension == "app" else { throw UpdateError("Not running from an app bundle; cannot replace myself.") }
+        guard !runningFromBackup else { throw UpdateError(backupMessage) }
+        guard installed.lastPathComponent == "AgentUsageBar.app" else { throw UpdateError("The app is not named AgentUsageBar.app, so it can't replace itself.") }
+        if !TestHooks.enabled {
+            let expected = UpdatePaths.staging.appendingPathComponent("AgentUsageBar.app").standardizedFileURL.path
+            guard staged.standardizedFileURL.path == expected else { throw UpdateError("Refusing a staged app outside the updater's staging folder.") }
+        }
         guard let res = Bundle.main.resourceURL?.appendingPathComponent("aub-swap.sh"), FileManager.default.fileExists(atPath: res.path) else {
             throw UpdateError("This build has no swap helper (aub-swap.sh).")
         }
         let fm = FileManager.default
         try fm.createDirectory(at: UpdatePaths.support, withIntermediateDirectories: true)
-        try? fm.removeItem(at: UpdatePaths.helper)
+        var isDir: ObjCBool = false
+        if fm.fileExists(atPath: UpdatePaths.helper.path, isDirectory: &isDir), !isDir.boolValue { try fm.removeItem(at: UpdatePaths.helper) }
         try fm.copyItem(at: res, to: UpdatePaths.helper)
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: UpdatePaths.helper.path)
 
@@ -450,10 +615,11 @@ enum Updater {
         defer { posix_spawnattr_destroy(&attr) }
         posix_spawnattr_setflags(&attr, Int16(0x0400))   // POSIX_SPAWN_SETSID: own session, survives our exit
 
-        let args = ["/bin/bash", UpdatePaths.helper.path, String(getpid()), installed.path, staged.path, UpdatePaths.logFile.path]
+        var args = ["/bin/bash", UpdatePaths.helper.path, String(getpid()), installed.path, staged.path, UpdatePaths.logFile.path, UpdatePaths.backupApp.path]
+        if TestHooks.enabled { args.append("--test-hooks") }
         let argv: [UnsafeMutablePointer<CChar>?] = args.map { strdup($0) } + [nil]
         var henv = baseEnv()
-        for k in ["AUB_OPEN_CMD", "AUB_SETTLE_SECONDS"] { if let v = ProcessInfo.processInfo.environment[k] { henv[k] = v } }   // test hooks
+        for k in ["AUB_OPEN_CMD", "AUB_SETTLE_SECONDS"] { if let v = TestHooks.env(k) { henv[k] = v } }   // test builds only
         let envp: [UnsafeMutablePointer<CChar>?] = henv.map { strdup("\($0.key)=\($0.value)") } + [nil]
         defer { argv.forEach { free($0) }; envp.forEach { free($0) } }
         var pid: pid_t = 0
@@ -484,7 +650,7 @@ enum Updater {
             }
         }
         // Test hook: hand a given staged .app to the real swap helper, then quit (exercises the detached spawn).
-        if let staged = arg("--update-swap-test") {
+        if let staged = TestHooks.arg("--update-swap-test") {
             do { try launchSwap(staged: URL(fileURLWithPath: staged)); print("swap helper launched"); exit(0) }
             catch { print("error: \(error)"); exit(1) }
         }
@@ -501,11 +667,16 @@ enum Updater {
                 tag = t
             }
             do {
-                let staged = try prepare(tag: tag, source: arg("--update-source")) { print("stage: \($0)"); fflush(stdout) }
+                try acquireLock()
+                let source = TestHooks.arg("--update-source")
+                let commit = try resolveTagCommit(tag: tag, source: source)
+                print("tag \(tag) = \(commit.prefix(7))")
+                let staged = try prepare(tag: tag, source: source, expectedCommit: commit) { print("stage: \($0)"); fflush(stdout) }
                 print("RESULT: ok tag=\(tag) staged=\(staged.path) version=verified selftest=passed")
                 print("log: \(UpdatePaths.logFile.path)")
-                exit(0)
+                releaseLock(); exit(0)
             } catch {
+                releaseLock()
                 print("RESULT: FAILED \(error)")
                 print("log: \(UpdatePaths.logFile.path)")
                 exit(1)
@@ -563,8 +734,19 @@ enum Updater {
         ("a", false), ("a/b/c", false), ("/b", false), ("a/", false), ("../x", false), ("a/..", false), ("a b/c", false), ("a/b;rm", false),
     ]
 
+    static let backupCases: [(String, String, Bool)] = [
+        ("/Users/x/Library/Application Support/AgentUsageBar/previous/AgentUsageBar.app", "/Users/x/Library/Application Support/AgentUsageBar/previous", true),
+        ("/Users/x/Applications/AgentUsageBar.previous.app", "/Users/x/Library/Application Support/AgentUsageBar/previous", true),
+        ("/Users/x/Applications/AgentUsageBar.app", "/Users/x/Library/Application Support/AgentUsageBar/previous", false),
+        ("/Applications/AgentUsageBar.app", "/Users/x/Library/Application Support/AgentUsageBar/previous", false),
+        ("/Users/x/Library/Application Support/AgentUsageBar/previous/../AgentUsageBar.app", "/Users/x/Library/Application Support/AgentUsageBar/previous", false),
+    ]
+
     static func selfTest() -> [String] {
         var f: [String] = []
+        for (b, d, want) in backupCases where isBackupCopy(bundle: b, backupDir: d) != want { f.append("backup \(b): want \(want)") }
+        if friendlyCheckError(URLError(.notConnectedToInternet)) != "Couldn't reach GitHub. Check your connection." { f.append("friendly error: network") }
+        if friendlyCheckError(UpdateError("No releases published yet.")) != "Couldn't check: No releases published yet." { f.append("friendly error: other") }
         for (a, b, want) in versionCases where SemVer.isNewer(a, than: b) != want { f.append("semver \(a) > \(b): want \(want)") }
         for (t, want) in tagCases where UpdateTag.isValid(t) != want { f.append("tag \(t.debugDescription): want valid=\(want)") }
         for (loc, want) in locationCases {

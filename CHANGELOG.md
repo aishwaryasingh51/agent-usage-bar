@@ -12,11 +12,19 @@ All notable changes to Agent Usage Bar are documented here. The format follows
   available", a "What's new" link and an Update button. Nothing is installed
   silently: pressing Update asks you to confirm, then the app downloads the
   source for that release, builds it on your Mac, checks the new build, and
-  restarts into it. Your previous version is kept as `AgentUsageBar.previous.app`
-  next to the app. If anything fails, the current version stays untouched and the
+  restarts into it. Your previous version is kept in
+  `~/Library/Application Support/AgentUsageBar/previous` (not in the Applications
+  folder); the backup copy says "This is the backup copy. Open AgentUsageBar.app to
+  update." instead of offering an update. The confirmation names the version and
+  the short commit it will build, and says the build script runs with your
+  permissions. If anything fails, the current version stays untouched and the
   popover shows what went wrong and where the log is. In-app updating needs git
   and the Xcode Command Line Tools (`xcode-select --install`); without them the
-  app only tells you a new version exists and links to it.
+  app only tells you a new version exists and links to it. After an update the
+  app re-enables "Launch at login" if you had it on and macOS dropped it, and
+  clears the build cache of the update checkout. The restart helper is copied
+  from the app being replaced, so each update uses the helper of the version you
+  are updating from.
 
 ## [0.2.2] - 2026-11-26
 

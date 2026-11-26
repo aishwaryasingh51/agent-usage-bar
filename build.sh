@@ -17,10 +17,13 @@ fi
 if ! printf '%s' "$UPDATE_REPO" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'; then
   UPDATE_REPO="aishwaryasingh51/agent-usage-bar"
 fi
+# AUB_TEST_BUILD=1 compiles in the updater's test hooks (env/flag overrides). Never use it for a real install.
+SWIFT_EXTRA=()
+if [ "${AUB_TEST_BUILD:-}" = 1 ]; then SWIFT_EXTRA=(-Xswiftc -DAUB_TEST_HOOKS); fi
 cd "$ROOT/App"
 echo "let appVersion = \"$VERSION\"  // generated from VERSION by build.sh" > Sources/AgentUsageBar/Version.swift
-swift build -c release --arch arm64
-BIN="$(swift build -c release --arch arm64 --show-bin-path)/AgentUsageBar"
+swift build -c release --arch arm64 ${SWIFT_EXTRA[@]+"${SWIFT_EXTRA[@]}"}
+BIN="$(swift build -c release --arch arm64 ${SWIFT_EXTRA[@]+"${SWIFT_EXTRA[@]}"} --show-bin-path)/AgentUsageBar"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/collectors" "$APP/Contents/Resources/Icons"
 cp "$BIN" "$APP/Contents/MacOS/AgentUsageBar"

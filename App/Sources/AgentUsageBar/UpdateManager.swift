@@ -24,7 +24,7 @@ final class UpdateManager: ObservableObject {
 
     let current = Updater.currentVersion
     private static let key = "checkForUpdates"
-    private let fakeLatest: String? = Updater.arg("--fake-latest").flatMap { UpdateTag.isValid($0) ? $0 : nil }
+    private let fakeLatest: String? = TestHooks.arg("--fake-latest").flatMap { UpdateTag.isValid($0) ? $0 : nil }
     private var timer: Timer?
 
     init() {
@@ -67,7 +67,7 @@ final class UpdateManager: ObservableObject {
             } catch {
                 checking = false
                 UpdateLog.write("update check failed: \(error)")
-                if manual { status = "Couldn't check: \(error)" }
+                if manual { status = Updater.friendlyCheckError(error) }
             }
         }
     }
@@ -93,30 +93,49 @@ final class UpdateManager: ObservableObject {
 
     func requestUpdate() {
         guard let tag = latest, busy == nil, prereqProblem == nil else { return }
+        busy = "Looking up \(tag)…"; failure = nil
+        // Find out which exact commit the tag points at, so the confirmation can show it.
+        Task.detached {
+            do {
+                let commit = try Updater.resolveTagCommit(tag: tag)
+                await MainActor.run {
+                    self.busy = nil
+                    self.confirmAndStart(tag, commit: commit)
+                }
+            } catch {
+                UpdateLog.write("tag lookup failed: \(error)")
+                await MainActor.run {
+                    self.busy = nil
+                    self.failure = "Update to \(tag) failed: \(error) The current version is still installed and running. Log: \(UpdatePaths.displayLog)"
+                }
+            }
+        }
+    }
+
+    private func confirmAndStart(_ tag: String, commit: String) {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = "Update Agent Usage Bar to \(tag)?"
         alert.informativeText = """
-            This will download the source code for \(tag) from github.com/\(Updater.slug), build it on this Mac (a few minutes), \
-            and then restart the app.
+            This will download version \(tag) (commit \(commit.prefix(7))) from github.com/\(Updater.slug), \
+            run its build script with your permissions on this Mac (a few minutes), and then restart the app.
 
-            The current version is kept as AgentUsageBar.previous.app so you can go back. If the new build fails its checks, nothing is changed.
+            Only continue if you trust that repository. Your current version is kept as a backup in \
+            ~/Library/Application Support/AgentUsageBar/previous so you can go back. If the new build fails its checks, nothing is changed.
             """
         alert.addButton(withTitle: "Update and Restart")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        startUpdate(tag)
+        startUpdate(tag, commit: commit)
     }
 
-    private func startUpdate(_ tag: String) {
+    private func startUpdate(_ tag: String, commit: String) {
         busy = "Preparing…"; failure = nil
         Task.detached {
             do {
-                let staged = try Updater.prepare(tag: tag, source: nil) { stage in
+                try Updater.perform(tag: tag, expectedCommit: commit) { stage in
                     Task { @MainActor in self.busy = stage }
                 }
-                await MainActor.run { self.busy = "Restarting…" }
-                try Updater.launchSwap(staged: staged)
                 await MainActor.run { NSApp.terminate(nil) }
             } catch {
                 UpdateLog.write("update failed: \(error)")
@@ -141,6 +160,7 @@ struct UpdateBar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if Updater.runningFromBackup && u.latest == nil { Note(text: Updater.backupMessage, tint: .orange) }
             if let tag = u.latest {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.down.circle.fill").foregroundStyle(Color.accentColor)

@@ -183,13 +183,29 @@ final class Store: ObservableObject {
             UserDefaults.standard.set(true, forKey: key)
             try? SMAppService.mainApp.register()
         }
+        let d = UserDefaults.standard
+        // Remember what the user wants. Before this was stored, the current state is the best answer.
+        if d.object(forKey: Self.loginPrefKey) == nil { d.set(SMAppService.mainApp.status == .enabled, forKey: Self.loginPrefKey) }
+        // After an update the app is a new bundle: if the user wants launch at login and it got dropped, put it back.
+        let lastSeen = d.string(forKey: "lastSeenVersion")
+        if lastSeen != appVersion {
+            d.set(appVersion, forKey: "lastSeenVersion")
+            if d.bool(forKey: Self.loginPrefKey), SMAppService.mainApp.status != .enabled {
+                do { try SMAppService.mainApp.register(); UpdateLog.write("version changed (\(lastSeen ?? "none") -> \(appVersion)): launch at login re-registered") }
+                catch { UpdateLog.write("version changed: could not re-register launch at login: \(error)") }
+            }
+            Task.detached { Updater.cleanBuildCache() }
+        }
         launchAtLogin = SMAppService.mainApp.status == .enabled
     }
+
+    private static let loginPrefKey = "launchAtLoginWanted"
 
     func setLaunchAtLogin(_ on: Bool) {
         do {
             if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
         } catch { NSLog("launch at login: \(error)") }
+        UserDefaults.standard.set(on, forKey: Self.loginPrefKey)
         launchAtLogin = SMAppService.mainApp.status == .enabled
     }
 }
