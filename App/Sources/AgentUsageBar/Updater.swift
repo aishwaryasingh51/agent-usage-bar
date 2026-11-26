@@ -446,13 +446,13 @@ enum Updater {
         let want = git(["rev-parse", "--verify", "--quiet", "\(ref)^{commit}"], tee: false)
         let wantCommit = want.output.trimmingCharacters(in: .whitespacesAndNewlines)
         guard want.ok, !wantCommit.isEmpty else { throw UpdateError("Tag \(tag) was not found in the repository.") }
-        let co = git(["checkout", "--quiet", "--detach", ref])
+        if let e = expectedCommit, !e.isEmpty, e != wantCommit {
+            throw UpdateError("Tag \(tag) now points at a different commit than the one you confirmed (\(e.prefix(7)) vs \(wantCommit.prefix(7))). Nothing was installed.")
+        }
+        let co = git(["checkout", "--quiet", "--detach", wantCommit])
         guard co.ok else { throw UpdateError("Could not check out \(tag): " + lastLine(co.output)) }
         let head = git(["rev-parse", "HEAD"], tee: false).output.trimmingCharacters(in: .whitespacesAndNewlines)
         guard head == wantCommit else { throw UpdateError("Checked-out commit does not match tag \(tag).") }
-        if let e = expectedCommit, !e.isEmpty, e != head {
-            throw UpdateError("Tag \(tag) now points at a different commit than the one you confirmed (\(e.prefix(7)) vs \(head.prefix(7))). Nothing was installed.")
-        }
         UpdateLog.write("checked out \(tag) = \(head)")
 
         // Build into a fresh staging folder.
@@ -507,6 +507,25 @@ enum Updater {
         }
     }
 
+    /// True only while THIS process holds the lock, so a blocked run never deletes someone else's lock.
+    nonisolated(unsafe) private static var holdsLock = false
+
+    /// True while some process (us or another) holds a live update lock. Used to keep housekeeping away from a running build.
+    static var lockHeld: Bool {
+        if holdsLock { return true }
+        guard FileManager.default.fileExists(atPath: UpdatePaths.lockDir.path) else { return false }
+        let pid = (try? String(contentsOf: UpdatePaths.lockDir.appendingPathComponent("pid"), encoding: .utf8))
+            .flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        if let o = pid, o > 0 { return kill(o, 0) == 0 || errno == EPERM }
+        return lockIsFresh()
+    }
+
+    /// A lock folder with no pid yet is a lock being created right now, unless it is old.
+    private static func lockIsFresh() -> Bool {
+        let m = (try? FileManager.default.attributesOfItem(atPath: UpdatePaths.lockDir.path)[.modificationDate]) as? Date
+        return m.map { Date().timeIntervalSince($0) < 30 } ?? false
+    }
+
     /// One update at a time: a lock folder holding our pid. A lock whose process is gone is stale and is cleared.
     static func acquireLock() throws {
         let fm = FileManager.default
@@ -514,13 +533,16 @@ enum Updater {
         let pidFile = UpdatePaths.lockDir.appendingPathComponent("pid")
         for _ in 0..<2 {
             if mkdir(UpdatePaths.lockDir.path, 0o755) == 0 {
-                try Data("\(getpid())\n".utf8).write(to: pidFile)
+                do { try Data("\(getpid())\n".utf8).write(to: pidFile) }
+                catch { rmdir(UpdatePaths.lockDir.path); throw error }
+                holdsLock = true
                 return
             }
             let other = (try? String(contentsOf: pidFile, encoding: .utf8)).flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
-            if let o = other, o > 0, o != getpid(), kill(o, 0) == 0 || errno == EPERM {
+            if let o = other, o > 0, kill(o, 0) == 0 || errno == EPERM {
                 throw UpdateError("Another update is already running (process \(o)).")
             }
+            if other == nil, lockIsFresh() { throw UpdateError("Another update is already running (starting up).") }
             UpdateLog.write("clearing stale update lock (pid \(other.map(String.init) ?? "unknown"))")
             try? fm.removeItem(at: pidFile)
             rmdir(UpdatePaths.lockDir.path)
@@ -529,6 +551,8 @@ enum Updater {
     }
 
     static func releaseLock() {
+        guard holdsLock else { return }
+        holdsLock = false
         try? FileManager.default.removeItem(at: UpdatePaths.lockDir.appendingPathComponent("pid"))
         rmdir(UpdatePaths.lockDir.path)
     }
@@ -556,6 +580,7 @@ enum Updater {
         let fm = FileManager.default
         let src = UpdatePaths.checkout
         guard fm.fileExists(atPath: src.appendingPathComponent(".git").path) else { return }   // only inside our own checkout
+        guard !lockHeld else { return }   // an update may be building in there right now
         for sub in ["App/.build", ".build"] {
             let d = src.appendingPathComponent(sub)
             if fm.fileExists(atPath: d.path) { try? fm.removeItem(at: d); UpdateLog.write("removed build cache \(d.path)") }
@@ -666,8 +691,12 @@ enum Updater {
                 guard let t = out.value else { print("error: could not determine the latest tag"); exit(1) }
                 tag = t
             }
+            do { try acquireLock() } catch {
+                print("RESULT: FAILED \(error)")
+                print("log: \(UpdatePaths.logFile.path)")
+                exit(1)
+            }
             do {
-                try acquireLock()
                 let source = TestHooks.arg("--update-source")
                 let commit = try resolveTagCommit(tag: tag, source: source)
                 print("tag \(tag) = \(commit.prefix(7))")

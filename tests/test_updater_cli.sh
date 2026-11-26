@@ -84,6 +84,11 @@ sleep 60 & LP=$!
 mkdir -p "$S3/update.lock"; echo $LP >"$S3/update.lock/pid"
 out="$(AUB_SUPPORT_DIR="$S3" "$TB" --update-dry-run --update-tag "$TAG" --update-source "$SRC" 2>&1)"
 check "live lock blocks a second update" 'echo "$out" | grep -q "already running"'
+check "blocked run leaves the holder's lock intact" '[ "$(cat "$S3/update.lock/pid")" = "$LP" ]'
+mkdir -p "$S3/update.lock"; rm -f "$S3/update.lock/pid"
+out="$(AUB_SUPPORT_DIR="$S3" "$TB" --update-dry-run --update-tag "$TAG" --update-source "$SRC" 2>&1)"
+check "fresh lock with no pid yet counts as live" 'echo "$out" | grep -q "already running" && [ -d "$S3/update.lock" ]'
+rmdir "$S3/update.lock" 2>/dev/null
 kill $LP 2>/dev/null
 
 # --- swap launched by the app (test build) hands the right arguments to the helper

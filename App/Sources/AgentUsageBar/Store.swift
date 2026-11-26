@@ -178,6 +178,8 @@ final class Store: ObservableObject {
     // MARK: Launch at login (default ON)
 
     private func setupLaunchAtLogin() {
+        // The backup copy must never register itself, record its version, or clean the build cache.
+        if Updater.runningFromBackup { launchAtLogin = SMAppService.mainApp.status == .enabled; return }
         let key = "didSetDefaultLaunchAtLogin"
         if !UserDefaults.standard.bool(forKey: key) {
             UserDefaults.standard.set(true, forKey: key)
