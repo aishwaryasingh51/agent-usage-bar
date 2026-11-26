@@ -31,7 +31,10 @@ Set `INSTALL_DIR` to install somewhere other than `~/Applications`.
 On first run macOS asks whether `security` may access the Keychain item. Choose
 **Always Allow** so it does not ask on every refresh.
 
-Click the gauge in the menu bar for details. The app refreshes every 15 minutes
+The menu bar label shows every agent side by side: its logo and the percentage
+of its 5-hour session limit used (for example `[claude] 7%  [agy] 18%`). A provider
+that is not ready shows `–`, and a number turns red at 90%. Click anywhere on the
+label for the full popover with weekly windows and details. The app refreshes every 15 minutes
 (3 minutes when any limit is at 90% or more) and turns red at 90%.
 "Launch at login" is on by default; toggle it in the popover.
 

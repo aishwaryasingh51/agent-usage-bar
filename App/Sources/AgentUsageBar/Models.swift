@@ -91,6 +91,18 @@ struct Provider: Decodable, Identifiable {
     }
     func maxPercent(now: Date) -> Double? { windows(now: now).map { $0.1 }.max() }
 
+    /// Menu bar value: the 5-hour session window. Picks the limit whose title/label says
+    /// session / 5-hour / five hour; otherwise the shortest window (soonest reset).
+    func sessionPercent(now: Date) -> Double? {
+        let ws = windows(now: now)
+        func isSession(_ w: LimitWindow) -> Bool {
+            let t = ((w.title ?? "") + " " + (w.label ?? "")).lowercased()
+            return t.contains("session") || t.contains("5-hour") || t.contains("5 hour") || t.contains("five hour") || t.contains("five-hour")
+        }
+        if let m = ws.first(where: { isSession($0.0) }) { return m.1 }
+        return ws.min { ($0.0.resetDate ?? .distantFuture) < ($1.0.resetDate ?? .distantFuture) }?.1
+    }
+
     /// Top-4 models by total tokens.
     var topModels: [(name: String, bucket: ModelBucket)] {
         (modelUsage ?? [:]).map { (Provider.friendly($0.key), $0.value) }
@@ -125,9 +137,31 @@ struct Provider: Decodable, Identifiable {
             ("gemini-3.8-flash-medium", "Gemini 3.8 Flash Medium"),
             ("gemini-4-hydrogen-tiered-high", "Gemini 4 Hydrogen Tiered High"),
         ]
-        return cases.compactMap { id, want in
+        var fails = cases.compactMap { id, want -> String? in
             let got = friendly(id)
             return got == want ? nil : "\(id): got '\(got)', want '\(want)'"
+        }
+        fails += sessionSelfTest()
+        return fails
+    }
+
+    static let selfTestCount = 8 + 5
+
+    private static func sessionSelfTest() -> [String] {
+        func prov(_ limits: String) -> Provider? {
+            try? JSONDecoder().decode(Provider.self, from: Data(#"{"id":"x","limits":\#(limits)}"#.utf8))
+        }
+        let far = "2099-01-01T00:00:00Z", later = "2099-02-01T00:00:00Z"
+        let cases: [(String, String, Double?)] = [
+            ("claude-style", #"[{"label":"Session (5-hour)","title":"Session","percent":0.34,"resetsAt":"\#(far)"},{"label":"Weekly (7-day)","title":"Weekly","percent":0.58,"resetsAt":"\#(far)"}]"#, 0.34),
+            ("agy-style", #"[{"label":"Weekly (7-day)","title":"Weekly","percent":0.71,"resetsAt":"\#(far)"},{"label":"Session (5-hour)","title":"Session","percent":0.12,"resetsAt":"\#(far)"}]"#, 0.12),
+            ("five-hour label", #"[{"label":"Weekly","percent":0.9},{"label":"Five Hour","percent":0.2}]"#, 0.2),
+            ("fallback shortest", #"[{"label":"A","percent":0.8,"resetsAt":"\#(later)"},{"label":"B","percent":0.3,"resetsAt":"\#(far)"}]"#, 0.3),
+            ("no limits", "[]", nil),
+        ]
+        return cases.compactMap { name, json, want in
+            let got = prov(json)?.sessionPercent(now: Date())
+            return got == want ? nil : "session \(name): got \(String(describing: got)), want \(String(describing: want))"
         }
     }
 }

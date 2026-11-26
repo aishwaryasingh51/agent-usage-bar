@@ -10,7 +10,7 @@ struct AgentUsageBarApp: App {
         let a = CommandLine.arguments
         if a.contains("--selftest") {
             let fails = Provider.selfTest()
-            if fails.isEmpty { print("selftest: 8/8 passed"); exit(0) }
+            if fails.isEmpty { print("selftest: \(Provider.selfTestCount)/\(Provider.selfTestCount) passed"); exit(0) }
             fails.forEach { print("FAIL " + $0) }
             exit(1)
         }
@@ -33,38 +33,54 @@ struct AgentUsageBarApp: App {
         MenuBarExtra {
             PanelView().environmentObject(store)
         } label: {
-            MenuLabel(percent: store.topPercent, alarming: store.alarming, iconId: store.topProviderId)
+            MenuLabel(items: store.labelItems)
         }
         .menuBarExtraStyle(.window)
     }
 }
 
-/// Template (monochrome) normally; a red, non-template bitmap when alarming,
-/// because the menu bar only honours colour on non-template images.
+/// One entry per provider, in switcher order: logo + 5-hour session %, or "–" when not ready.
+struct LabelItem: Equatable {
+    let id: String
+    let percent: Double?   // nil = not ready / unknown
+    var alarming: Bool { (percent ?? 0) >= 0.9 }
+}
+
+/// A single bitmap holding every provider. Template (monochrome) normally; when any
+/// number is red it is a non-template bitmap (the menu bar only honours colour there),
+/// with the logos and digits drawn in the current menu bar ink.
 struct MenuLabel: View {
-    let percent: Double?
-    let alarming: Bool
-    let iconId: String?
+    let items: [LabelItem]
+    var dark: Bool? = nil
 
     var body: some View {
         Image(nsImage: render())
     }
 
     private func render() -> NSImage {
-        let text = percent.map { "\(Int(($0 * 100).rounded()))%" }
-        let content = HStack(spacing: 3) {
-            ProviderIcon.image(for: iconId ?? "", fallback: "gauge.with.dots.needle.50percent", tinted: true)
-                .frame(width: 15, height: 15)
-            if let text { Text(text).monospacedDigit() }
+        let anyRed = items.contains { $0.alarming }
+        let isDark = dark ?? (NSApp?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
+        let ink: Color = anyRed ? (isDark ? .white : .black) : .black
+        let content = HStack(spacing: 7) {
+            ForEach(items, id: \.id) { it in
+                HStack(spacing: 2) {
+                    ProviderIcon.image(for: it.id, fallback: "gauge.with.dots.needle.50percent", tinted: true)
+                        .frame(width: 14, height: 14)
+                    Text(it.percent.map { "\(Int(($0 * 100).rounded()))%" } ?? "–")
+                        .monospacedDigit()
+                        .foregroundStyle(it.alarming ? Color.red : ink)
+                }
+            }
+            if items.isEmpty { Image(systemName: "gauge").frame(width: 14, height: 14) }
         }
-        .font(.system(size: 13, weight: .medium))
-        .foregroundStyle(alarming ? Color.red : Color.black)
+        .font(.system(size: 12, weight: .medium))
+        .foregroundStyle(ink)
         .padding(.horizontal, 1)
 
         let r = ImageRenderer(content: content)
         r.scale = NSScreen.main?.backingScaleFactor ?? 2
         let img = r.nsImage ?? NSImage(systemSymbolName: "gauge", accessibilityDescription: "Agent Usage Bar") ?? NSImage()
-        img.isTemplate = !alarming
+        img.isTemplate = !anyRed
         return img
     }
 }
@@ -117,12 +133,10 @@ enum Snapshot {
             }
         }
         store.selectedId = nil
-        for (name, alarm) in [("normal", false), ("alarm", true)] {
-            let v = MenuLabel(percent: store.topPercent, alarming: alarm, iconId: store.topProviderId)
-                .padding(6).background(Color(white: 0.8))
-            let r = ImageRenderer(content: v); r.scale = 3
-            if let img = r.cgImage { save(img, "\(dir)/label-\(name).png") }
-        }
+        let v = MenuLabel(items: store.labelItems, dark: false)
+            .padding(6).background(Color(white: 0.8))
+        let r = ImageRenderer(content: v); r.scale = 3
+        if let img = r.cgImage { save(img, "\(dir)/label.png") }
         exit(0)
     }
     static func save(_ img: CGImage, _ path: String) {

@@ -74,6 +74,10 @@ final class Store: ObservableObject {
     var topProviderId: String? {
         candidates.max { ($0.maxPercent(now: now) ?? -1) < ($1.maxPercent(now: now) ?? -1) }?.id
     }
+    /// Menu bar label entries: every provider (switcher order), session % or nil when not ready.
+    var labelItems: [LabelItem] {
+        providers.map { LabelItem(id: $0.id, percent: $0.ready == false ? nil : $0.sessionPercent(now: now)) }
+    }
     var balanceAlarming: Bool { providers.contains { $0.balance?.alarming == true } }
     var alarming: Bool { (topPercent ?? 0) >= 0.9 || balanceAlarming }
 
