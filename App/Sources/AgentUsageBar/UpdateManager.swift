@@ -154,8 +154,13 @@ final class UpdateManager: ObservableObject {
     }
 }
 
-/// Footer block of the popover: update banner (when newer), failure note, and the on/off switch.
-struct UpdateBar: View {
+extension UpdateManager {
+    /// Whether the banner has anything to say; when false it takes no space at all.
+    var bannerVisible: Bool { (Updater.runningFromBackup && latest == nil) || latest != nil || failure != nil }
+}
+
+/// Top-of-footer notices in the main panel: update available, failure, backup copy. Empty otherwise.
+struct UpdateBanner: View {
     @EnvironmentObject var u: UpdateManager
 
     var body: some View {
@@ -186,17 +191,6 @@ struct UpdateBar: View {
             if let f = u.failure {
                 Note(text: f, tint: .red)
                 HStack { Button("Show log") { u.revealLog() }.controlSize(.small); Spacer() }
-            }
-            HStack {
-                Toggle("Check for updates", isOn: $u.checkEnabled)
-                    .toggleStyle(.switch).controlSize(.small)
-                Spacer()
-                if u.checking { ProgressView().controlSize(.small) }
-                else if let s = u.status {
-                    Text(s).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                } else { Text("v\(u.current)").font(.caption).foregroundStyle(.secondary) }
-                Button("Check now") { u.check(manual: true) }
-                    .controlSize(.small).disabled(u.checking || u.busy != nil)
             }
         }
     }

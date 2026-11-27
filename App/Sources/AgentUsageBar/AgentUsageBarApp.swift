@@ -130,7 +130,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] e in
             if e.keyCode == 53, let self, self.popover.isShown {
-                self.popover.performClose(nil)
+                // Esc backs out of Settings first; only the main panel closes the popover.
+                if self.store.showingSettings { self.store.showingSettings = false } else { self.popover.performClose(nil) }
                 return nil
             }
             return e
@@ -142,7 +143,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         if let m = localMonitor { NSEvent.removeMonitor(m); localMonitor = nil }
     }
 
-    func popoverDidClose(_ notification: Notification) { removeMonitors() }
+    func popoverDidClose(_ notification: Notification) {
+        removeMonitors()
+        store.showingSettings = false
+    }
 
     /// Debug (--simulate-outside-click): synthetic mouse-down far from the popover, then log whether it closed.
     private func simulateOutsideClick() {
@@ -308,6 +312,16 @@ enum Snapshot {
             }
         }
         store.selectedId = nil
+        // Settings page, same environment as the panel.
+        store.showingSettings = true
+        for (name, scheme) in [("light", ColorScheme.light), ("dark", .dark)] {
+            let view = PanelView().environmentObject(store).environmentObject(updater)
+                .background(scheme == .dark ? Color(white: 0.16) : Color(white: 0.96))
+                .environment(\.colorScheme, scheme)
+            let r = ImageRenderer(content: view); r.scale = 2
+            if let img = r.cgImage { save(img, "\(dir)/popover-settings-\(name).png") }
+        }
+        store.showingSettings = false
         let v = MenuLabel(items: store.labelItems, dark: false)
             .padding(6).background(Color(white: 0.8))
         let r = ImageRenderer(content: v); r.scale = 3

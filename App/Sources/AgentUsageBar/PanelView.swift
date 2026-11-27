@@ -3,6 +3,7 @@ import Charts
 
 struct PanelView: View {
     @EnvironmentObject var store: Store
+    @EnvironmentObject var updater: UpdateManager
 
     private var selected: Provider? {
         let ready = store.tabProviders
@@ -11,23 +12,53 @@ struct PanelView: View {
     }
 
     var body: some View {
+        Group {
+            if store.showingSettings { SettingsView() } else { main }
+        }
+        .padding(16)
+        .frame(width: 380)
+    }
+
+    private var main: some View {
         VStack(alignment: .leading, spacing: 14) {
+            let tabs = store.tabProviders
             if store.providers.isEmpty {
-                Text("No usage data yet.\nCollectors write JSON to\n\(Store.usageDir.path)")
-                    .font(.callout).foregroundStyle(.secondary)
-            }
-            if store.tabProviders.count > 1 { ProviderSwitcher(selected: selected?.id) }
-            if let p = selected {
-                ProviderSection(provider: p).id(p.id)
+                HStack(alignment: .top) {
+                    Text("No usage data yet.\nCollectors write JSON to\n\(Store.usageDir.path)")
+                        .font(.callout).foregroundStyle(.secondary)
+                    Spacer()
+                    GearButton(size: 24, radius: 7) { store.showingSettings = true }
+                }
+            } else if store.visibleProviders.isEmpty {
+                // Every bar is switched off in Settings: say so, don't show sign-in help.
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("All usage bars are hidden.").font(.callout).foregroundStyle(.secondary)
+                        Button("Open Settings") { store.showingSettings = true }
+                    }
+                    Spacer()
+                    GearButton(size: 24, radius: 7) { store.showingSettings = true }
+                }
             } else {
-                // Nothing ready: show every provider's sign-in help.
-                ForEach(store.providers) { p in ProviderSection(provider: p).id(p.id) }
+                if tabs.count > 1 {
+                    HStack(spacing: 6) {
+                        ProviderSwitcher(selected: selected?.id)
+                        GearButton(size: 32, radius: 9) { store.showingSettings = true }
+                    }
+                }
+                if let p = selected {
+                    ProviderSection(provider: p, showGear: tabs.count <= 1).id(p.id)
+                } else {
+                    // Nothing ready: show every provider's sign-in help.
+                    ForEach(Array(store.visibleProviders.enumerated()), id: \.element.id) { i, p in
+                        ProviderSection(provider: p, showGear: i == 0).id(p.id)
+                    }
+                }
             }
+            if updater.bannerVisible { UpdateBanner() }
             Divider()
-            UpdateBar()
             HStack {
-                Toggle("Launch at login", isOn: Binding(get: { store.launchAtLogin }, set: { store.setLaunchAtLogin($0) }))
-                    .toggleStyle(.switch).controlSize(.small)
+                Text("v\(updater.current)").font(.caption).foregroundStyle(.tertiary)
                 Spacer()
                 Button { store.refresh(force: true) } label: {
                     if store.refreshing { ProgressView().controlSize(.small) } else { Text("Refresh") }
@@ -37,8 +68,29 @@ struct PanelView: View {
                     .keyboardShortcut("q")
             }
         }
-        .padding(16)
-        .frame(width: 380)
+    }
+}
+
+/// Quiet rounded icon button used for the cog and the Settings back chevron.
+struct GearButton: View {
+    var symbol = "gearshape"
+    let size: CGFloat
+    let radius: CGFloat
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: size > 28 ? 14 : 12, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: size, height: size)
+                .background(Color.primary.opacity(hover ? 0.12 : 0.06), in: RoundedRectangle(cornerRadius: radius))
+                .contentShape(RoundedRectangle(cornerRadius: radius))
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .help(symbol == "gearshape" ? "Settings" : "Back")
     }
 }
 
@@ -76,6 +128,8 @@ struct ProviderSwitcher: View {
 
 struct ProviderSection: View {
     let provider: Provider
+    /// Show the subtle cog at the trailing edge (when there is no switcher row to hold it).
+    var showGear = false
     @EnvironmentObject var store: Store
 
     var body: some View {
@@ -103,6 +157,7 @@ struct ProviderSection: View {
                 if !provider.plan.isEmpty {
                     Text(provider.plan).font(.caption).foregroundStyle(.secondary)
                 }
+                if showGear { GearButton(size: 24, radius: 7) { store.showingSettings = true } }
             }
 
             if provider.ready == false {
