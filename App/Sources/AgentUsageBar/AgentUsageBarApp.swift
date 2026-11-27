@@ -9,6 +9,26 @@ struct AgentUsageBarApp: App {
     init() {
         // Debug aid: `AgentUsageBar --snapshot <dir>` renders the popover and bar label to PNGs, then exits.
         let a = CommandLine.arguments
+        if a.contains("--help") || a.contains("-h") {
+            print("""
+            Agent Usage Bar \(appVersion): macOS menu bar app for AI agent usage.
+
+            Usage: AgentUsageBar [option]
+
+              -h, --help        Show this help and exit
+              --version         Print the version and exit
+              --selftest        Run the built-in checks and exit
+              --check-icons     Report which provider icons resolve and exit
+              --update-check    Ask GitHub for the latest release and exit
+              --snapshot <dir>  Render the popover and bar label to PNGs in <dir>
+              --log-window      Show a log window
+              --open-popover-on-launch
+                                Open the popover at launch
+
+            With no option the app starts in the menu bar.
+            """)
+            exit(0)
+        }
         if a.contains("--version") { print("Agent Usage Bar \(appVersion)"); exit(0) }
         if a.contains("--selftest") {
             let fails = Provider.selfTest()
