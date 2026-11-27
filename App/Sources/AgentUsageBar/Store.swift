@@ -10,6 +10,11 @@ final class Store: ObservableObject {
     @Published var now = Date()
     /// Last manual provider choice this session; nil = follow the hottest provider.
     @Published var selectedId: String?
+    /// True while the popover shows the Settings page instead of the usage panel (reset when it closes).
+    @Published var showingSettings = false
+    /// Usage bars the user turned off, as "<provider id>|<window id>". Empty = all on, so new bars appear by default.
+    @Published private(set) var hiddenLimitKeys: Set<String> = Set(UserDefaults.standard.stringArray(forKey: Store.hiddenKeysPref) ?? [])
+    private static let hiddenKeysPref = "hiddenLimitKeys"
 
     /// True when launched with `--demo`: reads bundled synthetic data, runs no collectors.
     /// Also true when AGENT_USAGE_DIR points at a folder named "demo", so collectors never overwrite it.
@@ -62,12 +67,31 @@ final class Store: ObservableObject {
         if !Self.demo { startCollectorLoop() }
     }
 
+    // MARK: Visibility (Settings)
+
+    /// Providers with the user's hidden bars removed; a provider with every bar hidden is dropped.
+    /// Drives the switcher, panel and menu bar. Never use it for the Settings page.
+    var visibleProviders: [Provider] { Visibility.visible(providers, hidden: hiddenLimitKeys) }
+    /// Raw providers that have bars, for the Settings page: unaffected by hiding, so nothing can get stuck hidden.
+    var settingsProviders: [Provider] { Visibility.configurable(providers) }
+
+    func isLimitVisible(_ providerId: String, _ w: LimitWindow) -> Bool {
+        !hiddenLimitKeys.contains(Visibility.key(providerId, w))
+    }
+
+    func setLimitVisible(_ on: Bool, providerId: String, window w: LimitWindow) {
+        let k = Visibility.key(providerId, w)
+        if on { hiddenLimitKeys.remove(k) } else { hiddenLimitKeys.insert(k) }
+        // Demo/snapshot runs must not touch the user's real preferences.
+        if !Self.demo { UserDefaults.standard.set(hiddenLimitKeys.sorted(), forKey: Self.hiddenKeysPref) }
+    }
+
     // MARK: Menu bar summary
 
     /// Ready providers; all providers only when none are ready.
     private var candidates: [Provider] {
-        let ready = providers.filter { $0.ready != false }
-        return ready.isEmpty ? providers : ready
+        let ready = visibleProviders.filter { $0.ready != false }
+        return ready.isEmpty ? visibleProviders : ready
     }
     var topPercent: Double? { candidates.compactMap { $0.maxPercent(now: now) }.max() }
     /// Ready provider whose window is the fullest: its icon labels the menu bar.
@@ -75,12 +99,12 @@ final class Store: ObservableObject {
         candidates.max { ($0.maxPercent(now: now) ?? -1) < ($1.maxPercent(now: now) ?? -1) }?.id
     }
     /// Providers this Mac actually has (ready); drive the label and the popover tabs.
-    var readyProviders: [Provider] { providers.filter { $0.ready != false } }
+    var readyProviders: [Provider] { visibleProviders.filter { $0.ready != false } }
     /// Popover tabs: ready providers plus ones whose sign-in expired (so the user sees how to sign in again).
-    var tabProviders: [Provider] { providers.filter { $0.ready != false || $0.signInExpired } }
+    var tabProviders: [Provider] { visibleProviders.filter { $0.ready != false || $0.signInExpired } }
     /// Menu bar label entries: ready providers only; one neutral "–" entry when none are ready.
-    var labelItems: [LabelItem] { LabelItem.items(for: providers, now: now) }
-    var balanceAlarming: Bool { providers.contains { $0.balance?.alarming == true } }
+    var labelItems: [LabelItem] { LabelItem.items(for: visibleProviders, now: now) }
+    var balanceAlarming: Bool { visibleProviders.contains { $0.balance?.alarming == true } }
     var alarming: Bool { (topPercent ?? 0) >= 0.9 || balanceAlarming }
 
     // MARK: Reading
