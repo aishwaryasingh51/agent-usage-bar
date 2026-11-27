@@ -85,7 +85,7 @@ See [CHANGELOG.md](CHANGELOG.md) for what changed. Run `~/Applications/AgentUsag
 On first run macOS asks whether `security` may access the Keychain item. Choose **Always Allow** so it does not prompt on every refresh.
 
 - **Menu bar:** Displays only the agents configured (`ready`) on this Mac side by side — each logo with its **5-hour session** percentage used (for example, Claude `34%` and Antigravity `12%`; a Claude-only Mac shows only Claude). If none is ready, it shows one neutral logo with `–`. A session number turns **red at 90% or more**.
-- **Popover:** Click anywhere on the menu bar label to open the popover (opens on the busiest ready agent; switcher tabs show each ready provider's highest headline limit, and with nothing ready it shows the sign-in instructions). Shows 5-hour and weekly meters with live reset countdowns, Antigravity's grouped **Claude & GPT models** section, a 7-day token chart, and top models.
+- **Popover:** Click anywhere on the menu bar label to open the popover (opens on the busiest ready agent; switcher tabs show each ready provider's highest headline limit, plus tabs for expired sign-ins with sign-in instructions; with nothing ready it shows sign-in help for every provider). Shows 5-hour and weekly meters with live reset countdowns, Antigravity's grouped **Claude & GPT models** section, a 7-day token chart, and top models.
 - **Refresh & startup:** Refreshes every **15 minutes** (every **3 minutes** when any headline limit reaches **90% or more**). **Launch at login** is on by default and can be toggled in the popover.
 
 ## Icons
