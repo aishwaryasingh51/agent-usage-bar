@@ -105,12 +105,17 @@ struct Provider: Decodable, Identifiable {
         guard (limits ?? []).contains(where: { $0.isGrouped }) else { return nil }
         return id == "agy" ? "Gemini models" : "Main plan"
     }
-    func maxPercent(now: Date) -> Double? { windows(now: now).map { $0.1 }.max() }
+    /// Fullest headline window; when none is left (e.g. all headline bars hidden) the fullest grouped one.
+    func maxPercent(now: Date) -> Double? {
+        windows(now: now).map { $0.1 }.max() ?? groupedWindows(now: now).flatMap { $0.windows }.map { $0.1 }.max()
+    }
 
     /// Menu bar value: the 5-hour session window. Picks the limit whose title/label says
     /// session / 5-hour / five hour; otherwise the shortest window (soonest reset).
     func sessionPercent(now: Date) -> Double? {
-        let ws = windows(now: now)
+        // Headline windows first; when none are left (hidden or never there) the grouped ones.
+        var ws = windows(now: now)
+        if ws.isEmpty { ws = groupedWindows(now: now).flatMap { $0.windows } }
         func isSession(_ w: LimitWindow) -> Bool {
             let t = ((w.title ?? "") + " " + (w.label ?? "")).lowercased()
             return t.contains("session") || t.contains("5-hour") || t.contains("5 hour") || t.contains("five hour") || t.contains("five-hour")
@@ -161,11 +166,13 @@ struct Provider: Decodable, Identifiable {
         fails += demoShiftSelfTest()
         fails += LabelItem.selfTest()
         fails += expiredSelfTest()
+        fails += Visibility.selfTest()
+        fails += Projection.selfTest()
         fails += Updater.selfTest()
         return fails
     }
 
-    static let selfTestCount = 8 + 8 + 5 + 3 + 6 + 3 + 3 + Updater.selfTestCount
+    static let selfTestCount = 8 + 8 + 5 + 3 + 6 + 3 + 3 + Visibility.selfTestCount + Projection.selfTestCount + Updater.selfTestCount
 
     /// Not ready because the sign-in expired (user has the plan): kept as a popover tab, never in the bar label.
     var signInExpired: Bool {
@@ -197,7 +204,7 @@ struct Provider: Decodable, Identifiable {
             ("no limits", "[]", nil),
             ("grouped pool ignored", #"[{"label":"Session (5-hour)","title":"Session","percent":0.12,"resetsAt":"\#(far)"},{"label":"Weekly (7-day)","title":"Weekly","percent":0.71,"resetsAt":"\#(far)"},{"label":"Session (5-hour)","title":"Session","group":"Claude & GPT models","percent":0.95,"resetsAt":"\#(far)"},{"label":"Weekly (7-day)","title":"Weekly","group":"Claude & GPT models","percent":0.99,"resetsAt":"\#(far)"}]"#, 0.12),
             ("grouped listed first", #"[{"label":"Session (5-hour)","title":"Session","group":"Claude & GPT models","percent":0.95,"resetsAt":"\#(far)"},{"label":"Session (5-hour)","title":"Session","percent":0.12,"resetsAt":"\#(far)"}]"#, 0.12),
-            ("only grouped", #"[{"label":"Session (5-hour)","title":"Session","group":"G","percent":0.5,"resetsAt":"\#(far)"}]"#, nil),
+            ("only grouped falls back", #"[{"label":"Session (5-hour)","title":"Session","group":"G","percent":0.5,"resetsAt":"\#(far)"}]"#, 0.5),
         ]
         var fails = groupSelfTest()
         fails += cases.compactMap { name, json, want in
@@ -226,6 +233,78 @@ struct Provider: Decodable, Identifiable {
         let candidates = [p, hot]
         if candidates.max(by: { ($0.maxPercent(now: now) ?? -1) < ($1.maxPercent(now: now) ?? -1) })?.id != "b" { fails.append("group: hottest provider influenced by grouped limit") }
         if (candidates.compactMap { $0.maxPercent(now: now) }.max() ?? 0) >= 0.9 { fails.append("group: alarm influenced by grouped limit") }
+        return fails
+    }
+}
+
+/// Which usage bars the user turned off. Keys are "<provider id>|<window id>"; empty = everything shown,
+/// so windows that appear later are on by default.
+enum Visibility {
+    static func key(_ providerId: String, _ w: LimitWindow) -> String { providerId + "|" + w.id }
+
+    /// Providers as the main panel and menu bar see them: hidden bars removed, and a provider whose bars
+    /// are ALL hidden dropped. Providers that never had any limits are kept (they show balance/help text).
+    static func visible(_ providers: [Provider], hidden: Set<String>) -> [Provider] {
+        providers.compactMap { p in
+            guard !hidden.isEmpty, let all = p.limits, !all.isEmpty else { return p }
+            var c = p
+            c.limits = all.filter { !hidden.contains(key(p.id, $0)) }
+            return c.limits!.isEmpty ? nil : c
+        }
+    }
+
+    /// Providers the Settings page lists: raw, unfiltered, so a provider can always be switched back on.
+    static func configurable(_ providers: [Provider]) -> [Provider] {
+        providers.filter { !($0.limits ?? []).isEmpty }
+    }
+
+    /// All hidden: nothing is left to show, yet a provider that is ready (or expired-but-tabbed) existed.
+    /// Barless not-installed stubs must not keep the panel on sign-in help.
+    static func allHidden(_ providers: [Provider], visible: [Provider]) -> Bool {
+        let tabs = visible.filter { $0.ready != false || $0.signInExpired }
+        return tabs.isEmpty && providers.contains { $0.ready != false || $0.signInExpired }
+    }
+
+    static let selfTestCount = 14
+
+    static func selfTest() -> [String] {
+        let far = "2099-01-01T00:00:00Z"
+        func prov(_ id: String, _ limits: String) -> Provider {
+            try! JSONDecoder().decode(Provider.self, from: Data(#"{"id":"\#(id)","limits":\#(limits)}"#.utf8))
+        }
+        let sess = #"{"label":"Session (5-hour)","title":"Session","percent":0.2,"resetsAt":"\#(far)"}"#
+        let week = #"{"label":"Weekly (7-day)","title":"Weekly","percent":0.6,"resetsAt":"\#(far)"}"#
+        let pool = #"{"label":"Session (5-hour)","title":"Session","group":"Claude & GPT models","percent":0.4,"resetsAt":"\#(far)"}"#
+        let a = prov("a", "[\(sess),\(week)]")
+        let b = prov("b", "[\(sess)]")
+        let c = prov("c", "[\(sess),\(week),\(pool)]")
+        let now = Date()
+        let sessKey = key("a", a.limits![0]), weekKey = key("a", a.limits![1])
+        var fails: [String] = []
+        func check(_ ok: Bool, _ what: String) { if !ok { fails.append("visibility: " + what) } }
+
+        check(visible([a, b], hidden: []).map(\.id) == ["a", "b"], "empty hidden set shows everything")
+        let v1 = visible([a, b], hidden: [sessKey])
+        check(v1.first?.limits?.count == 1 && v1.first?.windows(now: now).first?.0.displayTitle == "Weekly", "hidden key removes only that bar")
+        check(key("b", b.limits![0]) != sessKey, "same bar in another provider has a different key")
+        check(v1.first?.sessionPercent(now: now) == 0.6, "menu bar falls back to the remaining headline bar")
+        check(visible([a, b], hidden: [sessKey, weekKey]).map(\.id) == ["b"], "provider with all bars hidden drops out")
+        check(configurable([a, b]).map(\.id) == ["a", "b"] && (configurable([a, b])[0].limits?.count == 2), "settings still lists a fully hidden provider with all bars")
+        check(visible([a], hidden: [sessKey, weekKey]).isEmpty, "all hidden gives the empty state")
+        let hideHead = [key("c", c.limits![0]), key("c", c.limits![1])]
+        let v2 = visible([c], hidden: Set(hideHead))
+        check(v2.first?.sessionPercent(now: now) == 0.4, "menu bar falls back to a grouped bar when headline bars are hidden")
+        check(v2.first?.windows(now: now).isEmpty == true && v2.first?.groupedWindows(now: now).count == 1, "hidden headline bars leave only the pool (view skips the heading with no rows)")
+        let hideGroup = visible([c], hidden: [key("c", c.limits![2])])
+        check(hideGroup.first?.mainPoolHeading == nil && hideGroup.first?.groupedWindows(now: now).isEmpty == true, "no heading when the grouped pool is hidden")
+        let hotHidden = prov("h", #"[{"label":"Session (5-hour)","title":"Session","percent":0.95,"resetsAt":"\#(far)"},{"label":"Weekly (7-day)","title":"Weekly","percent":0.1,"resetsAt":"\#(far)"}]"#)
+        let v3 = visible([hotHidden], hidden: [key("h", hotHidden.limits![0])])
+        check(v3.first?.maxPercent(now: now) == 0.1, "alarm and switcher % ignore hidden bars")
+        check(visible([prov("n", "[]")], hidden: [sessKey]).map(\.id) == ["n"], "provider with no limits is never dropped")
+        let stub = try! JSONDecoder().decode(Provider.self, from: Data(#"{"id":"agy","ready":false,"limits":[]}"#.utf8))
+        let hiddenAll = visible([a, stub], hidden: [sessKey, weekKey])
+        check(allHidden([a, stub], visible: hiddenAll), "ready provider all hidden + barless stub still gives the all-hidden state")
+        check(!allHidden([stub], visible: visible([stub], hidden: [])), "only a not-ready stub is not 'all hidden'")
         return fails
     }
 }

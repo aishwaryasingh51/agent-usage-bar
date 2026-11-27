@@ -10,6 +10,16 @@ final class Store: ObservableObject {
     @Published var now = Date()
     /// Last manual provider choice this session; nil = follow the hottest provider.
     @Published var selectedId: String?
+    /// True while the popover shows the Settings page instead of the usage panel (reset when it closes).
+    @Published var showingSettings = false
+    /// Usage bars the user turned off, as "<provider id>|<window id>". Empty = all on, so new bars appear by default.
+    @Published private(set) var hiddenLimitKeys: Set<String> = Store.demo ? [] : Set(UserDefaults.standard.stringArray(forKey: Store.hiddenKeysPref) ?? [])
+    private static let hiddenKeysPref = "hiddenLimitKeys"
+    /// Weekly pace projection on/off (default on). Not persisted in demo runs.
+    @Published private(set) var showProjection: Bool = Store.demo ? true : (UserDefaults.standard.object(forKey: Store.projectionPref) as? Bool ?? true)
+    private static let projectionPref = "showWeeklyProjection"
+    /// Per-window usage history for the pace projection. Never read or written in demo mode.
+    private var history: [String: WindowLog] = [:]
 
     /// True when launched with `--demo`: reads bundled synthetic data, runs no collectors.
     /// Also true when AGENT_USAGE_DIR points at a folder named "demo", so collectors never overwrite it.
@@ -50,7 +60,7 @@ final class Store: ObservableObject {
 
     init() {
         if !Self.demo { try? FileManager.default.createDirectory(at: Self.usageDir, withIntermediateDirectories: true) }
-        if !Self.demo { setupLaunchAtLogin() }
+        if !Self.demo { setupLaunchAtLogin(); history = Projection.load() }
         reload()
         // Poll the usage dir every 5s so new/changed files appear live.
         pollTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
@@ -62,12 +72,34 @@ final class Store: ObservableObject {
         if !Self.demo { startCollectorLoop() }
     }
 
+    // MARK: Visibility (Settings)
+
+    /// Providers with the user's hidden bars removed; a provider with every bar hidden is dropped.
+    /// Drives the switcher, panel and menu bar. Never use it for the Settings page.
+    var visibleProviders: [Provider] { Visibility.visible(providers, hidden: hiddenLimitKeys) }
+    /// True when the user has hidden every bar of every provider that could show one: the panel then says
+    /// so instead of showing sign-in help for barless/not-installed providers.
+    var allBarsHidden: Bool { Visibility.allHidden(providers, visible: visibleProviders) }
+    /// Raw providers that have bars, for the Settings page: unaffected by hiding, so nothing can get stuck hidden.
+    var settingsProviders: [Provider] { Visibility.configurable(providers) }
+
+    func isLimitVisible(_ providerId: String, _ w: LimitWindow) -> Bool {
+        !hiddenLimitKeys.contains(Visibility.key(providerId, w))
+    }
+
+    func setLimitVisible(_ on: Bool, providerId: String, window w: LimitWindow) {
+        let k = Visibility.key(providerId, w)
+        if on { hiddenLimitKeys.remove(k) } else { hiddenLimitKeys.insert(k) }
+        // Demo/snapshot runs must not touch the user's real preferences.
+        if !Self.demo { UserDefaults.standard.set(hiddenLimitKeys.sorted(), forKey: Self.hiddenKeysPref) }
+    }
+
     // MARK: Menu bar summary
 
     /// Ready providers; all providers only when none are ready.
     private var candidates: [Provider] {
-        let ready = providers.filter { $0.ready != false }
-        return ready.isEmpty ? providers : ready
+        let ready = visibleProviders.filter { $0.ready != false }
+        return ready.isEmpty ? visibleProviders : ready
     }
     var topPercent: Double? { candidates.compactMap { $0.maxPercent(now: now) }.max() }
     /// Ready provider whose window is the fullest: its icon labels the menu bar.
@@ -75,12 +107,12 @@ final class Store: ObservableObject {
         candidates.max { ($0.maxPercent(now: now) ?? -1) < ($1.maxPercent(now: now) ?? -1) }?.id
     }
     /// Providers this Mac actually has (ready); drive the label and the popover tabs.
-    var readyProviders: [Provider] { providers.filter { $0.ready != false } }
+    var readyProviders: [Provider] { visibleProviders.filter { $0.ready != false } }
     /// Popover tabs: ready providers plus ones whose sign-in expired (so the user sees how to sign in again).
-    var tabProviders: [Provider] { providers.filter { $0.ready != false || $0.signInExpired } }
+    var tabProviders: [Provider] { visibleProviders.filter { $0.ready != false || $0.signInExpired } }
     /// Menu bar label entries: ready providers only; one neutral "–" entry when none are ready.
-    var labelItems: [LabelItem] { LabelItem.items(for: providers, now: now) }
-    var balanceAlarming: Bool { providers.contains { $0.balance?.alarming == true } }
+    var labelItems: [LabelItem] { LabelItem.items(for: visibleProviders, now: now) }
+    var balanceAlarming: Bool { visibleProviders.contains { $0.balance?.alarming == true } }
     var alarming: Bool { (topPercent ?? 0) >= 0.9 || balanceAlarming }
 
     // MARK: Reading
@@ -106,6 +138,36 @@ final class Store: ObservableObject {
         // Claude first, then alphabetical.
         providers = out.sorted { ($0.id == "claude" ? "" : $0.id) < ($1.id == "claude" ? "" : $1.id) }
         now = Date()
+        recordHistory()
+    }
+
+    // MARK: Weekly pace
+
+    func setShowProjection(_ on: Bool) {
+        showProjection = on
+        if !Self.demo { UserDefaults.standard.set(on, forKey: Self.projectionPref) }
+    }
+
+    private func recordHistory() {
+        guard !Self.demo else { return }
+        var changed = false
+        let t = Date().timeIntervalSince1970
+        for p in providers {
+            for w in p.limits ?? [] where Projection.applies(w) {
+                guard let pct = w.percent, pct >= 0, let r = w.resetDate, r.timeIntervalSince1970 > t else { continue }
+                let key = Visibility.key(p.id, w)
+                var log = history[key] ?? WindowLog()
+                if log.record(percent: pct, resetsAt: r.timeIntervalSince1970, now: t) { history[key] = log; changed = true }
+            }
+        }
+        if changed { Projection.save(history) }
+    }
+
+    /// Pace for a weekly bar, or nil (toggle off, not weekly, or a quiet gate). Demo = pure week-to-date pace.
+    func projection(provider: String, window w: LimitWindow, percent: Double, now: Date) -> Projection.Result? {
+        guard showProjection, Projection.applies(w), let r = w.resetDate else { return nil }
+        let samples = Self.demo ? [] : (history[Visibility.key(provider, w)]?.samples ?? [])
+        return Projection.compute(percent: percent, reset: r, now: now, samples: samples)
     }
 
     // MARK: Collectors
