@@ -21,9 +21,7 @@ struct AgentUsageBarApp: App {
               --check-icons     Report which provider icons resolve and exit
               --update-check    Ask GitHub for the latest release and exit
               --snapshot <dir>  Render the popover and bar label to PNGs in <dir>
-              --log-window      Show a log window
-              --open-popover-on-launch
-                                Open the popover at launch
+              --demo            Run with bundled sample data
 
             With no option the app starts in the menu bar.
             """)

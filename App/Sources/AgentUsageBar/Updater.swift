@@ -265,7 +265,7 @@ enum Shell {
 enum Updater {
     static let defaultSlug = "aishwaryasingh51/agent-usage-bar"
     static let selfTestCount = versionCases.count + tagCases.count + locationCases.count + remoteCases.count + refusalCases.count + slugCases.count
-        + backupCases.count + 3
+        + backupCases.count + 4
 
     static func arg(_ name: String) -> String? {
         let a = CommandLine.arguments
@@ -382,12 +382,12 @@ enum Updater {
     static func isBackupCopy(bundle: String, backupDir: String) -> Bool {
         let b = URL(fileURLWithPath: bundle).standardizedFileURL
         if b.lastPathComponent.hasSuffix(".previous.app") { return true }
-        let dir = URL(fileURLWithPath: backupDir).standardizedFileURL.path
-        return b.deletingLastPathComponent().path == dir
+        let dir = URL(fileURLWithPath: backupDir).standardizedFileURL.resolvingSymlinksInPath().path
+        return b.deletingLastPathComponent().resolvingSymlinksInPath().path == dir
     }
     /// The installed bundle with symlinks resolved (the app may be reached through a symlink). Use this everywhere the
     /// bundle path is compared, checked or handed to the swap helper.
-    static var installedBundleURL: URL { Bundle.main.bundleURL.resolvingSymlinksInPath() }
+    static var installedBundleURL: URL { Bundle.main.bundleURL.standardizedFileURL.resolvingSymlinksInPath() }
     static var runningFromBackup: Bool { isBackupCopy(bundle: installedBundleURL.path, backupDir: UpdatePaths.backupDir.path) }
 
     /// Why in-app updating is unavailable on this Mac (nil = available). Blocking: call off the main thread.
@@ -801,10 +801,28 @@ enum Updater {
         return f
     }
 
+    /// A backup dir reached through a symlink must still match the real bundle path (and vice versa).
+    static func symlinkBackupSelfTest() -> [String] {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("aub-link-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: root) }
+        let real = root.appendingPathComponent("real"), link = root.appendingPathComponent("link")
+        do {
+            try fm.createDirectory(at: real.appendingPathComponent("previous"), withIntermediateDirectories: true)
+            try fm.createSymbolicLink(at: link, withDestinationURL: real)
+        } catch { return ["symlink backup: could not set up temp dirs"] }
+        let app = real.appendingPathComponent("previous/AgentUsageBar.app").path
+        var f: [String] = []
+        if !isBackupCopy(bundle: app, backupDir: link.appendingPathComponent("previous").path) { f.append("symlink backup: real bundle vs linked dir") }
+        if !isBackupCopy(bundle: link.appendingPathComponent("previous/AgentUsageBar.app").path, backupDir: real.appendingPathComponent("previous").path) { f.append("symlink backup: linked bundle vs real dir") }
+        return f
+    }
+
     static func selfTest() -> [String] {
         var f: [String] = []
         for (b, d, want) in backupCases where isBackupCopy(bundle: b, backupDir: d) != want { f.append("backup \(b): want \(want)") }
         f += plistReadSelfTest()
+        f += symlinkBackupSelfTest()
         if friendlyCheckError(URLError(.notConnectedToInternet)) != "Couldn't reach GitHub. Check your connection." { f.append("friendly error: network") }
         if friendlyCheckError(UpdateError("No releases published yet.")) != "Couldn't check: No releases published yet." { f.append("friendly error: other") }
         for (a, b, want) in versionCases where SemVer.isNewer(a, than: b) != want { f.append("semver \(a) > \(b): want \(want)") }

@@ -31,8 +31,9 @@ for flag in --help -h; do
     "$b" "$flag" >"$W/help.out" 2>&1 & hp=$!
     ( sleep 10; kill -9 $hp 2>/dev/null ) & wd=$!
     wait $hp; rc=$?
-    kill $wd 2>/dev/null; wait $wd 2>/dev/null
-    check "$(basename "$(dirname "$(dirname "$(dirname "$b")")")") $flag: usage, exit 0" '[ $rc = 0 ] && grep -q "^Usage: AgentUsageBar" "$W/help.out"'
+    pkill -P $wd 2>/dev/null; kill $wd 2>/dev/null; wait $wd 2>/dev/null
+    [ "$b" = "$TB" ] && lbl=test || lbl=normal
+    check "$lbl build $flag: usage, exit 0" '[ $rc = 0 ] && grep -q "^Usage: AgentUsageBar" "$W/help.out"'
   done
 done
 
