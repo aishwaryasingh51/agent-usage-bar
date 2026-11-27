@@ -1,143 +1,155 @@
-<p align="center"><img src="docs/icon.png" width="128" alt="Agent Usage Bar icon"></p>
+<p align="center">
+  <img src="docs/icon.png" width="128" height="128" alt="Agent Usage Bar app icon">
+</p>
 
 <h1 align="center">Agent Usage Bar</h1>
 
-<p align="center">A small macOS menu bar app that shows how much of your AI coding agent usage limits you have used, so you are not surprised by a rate limit.</p>
+<p align="center">
+  A native macOS menu bar app that tracks your AI coding agent usage limits, quota pools, and 7-day token history — so you are never surprised by a rate limit.
+</p>
 
-<p align="center"><a href="#build-and-install">Install</a> · <a href="#updating">Updating</a> · <a href="https://github.com/aishwaryasingh51/agent-usage-bar/releases/latest">Latest release</a></p>
+<p align="center">
+  macOS 14+ (Apple Silicon) · Native SwiftUI · MIT
+</p>
 
-<p align="center"><img src="docs/menubar.png" alt="The menu bar item: the Claude logo with 34% and the Antigravity logo with 12%, how much of each usage limit is used"></p>
+<p align="center">
+  <a href="#build-and-install">Install</a> ·
+  <a href="#updating">Updating</a> ·
+  <a href="#supported-agents">Supported agents</a> ·
+  <a href="https://github.com/aishwaryasingh51/agent-usage-bar/releases/latest">Latest release</a> ·
+  <a href="CHANGELOG.md">Changelog</a>
+</p>
 
-<p align="center"><img src="docs/screenshot.png" width="420" alt="The popover for Antigravity: Gemini models and Claude &amp; GPT models sections with session and weekly meters, a 7-day token chart, top models, an Update available banner with an Update button, a Check for updates switch and a Launch at login switch"></p>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/menubar.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/menubar-light.png">
+    <img src="docs/menubar.png" width="134" alt="Menu bar readout showing the Claude logo at 34% and the Antigravity logo at 12% of their 5-hour session limits">
+  </picture>
+</p>
 
-> **Unofficial.** It uses undocumented endpoints (`api.anthropic.com/api/oauth/usage`,
-> Google `cloudcode-pa` `v1internal`, and the `/quota` output of `agy`) that may
-> break whenever those CLIs update. Not affiliated with Anthropic or Google.
+<p align="center">
+  <img src="docs/screenshot.png" width="420" alt="Agent Usage Bar popover showing Antigravity with Gemini models and Claude &amp; GPT models quota meters, a 7-day token bar chart, top models, an Update available banner with an Update button, Check for updates, and Launch at login">
+</p>
+
+> [!NOTE]
+> **Unofficial.** This app reads undocumented endpoints (`api.anthropic.com/api/oauth/usage`, Google `cloudcode-pa` `v1internal`, and the `/quota` output of `agy`) that may break whenever those CLIs update. Not affiliated with Anthropic or Google.
 
 ## What's new in 0.3.0
-- **Updates from inside the app.** It checks GitHub releases and asks before
-  installing, showing the version and the commit it will build. It builds and
-  verifies the new version before swapping, keeps the previous one as a backup, and
-  puts it back automatically if the new one fails to start. You can turn the check off.
-- **Antigravity's second quota pool.** "Claude & GPT models" now has its own
-  section, with its own session and weekly meters.
-- **A new app icon.**
 
-See [CHANGELOG.md](CHANGELOG.md) for the full list.
+- **In-app self-updates.** Checks GitHub releases on launch and once a day (turn off anytime with **Check for updates**). Nothing installs silently: pressing **Update** resolves the release tag's commit, asks you to confirm before running `build.sh`, verifies `--version` and `--selftest`, keeps the previous version as a backup, and rolls back automatically if the new build fails to start.
+- **Antigravity's second quota pool.** **Claude & GPT models** now appears under its own grouped section alongside **Gemini models**, with separate 5-hour and weekly meters (showing *Not used yet* until active). The menu bar number, popover tabs, and 90% red alert continue to track Gemini limits only.
+- **Original macOS app icon.** A new gauge-and-sparkle icon (`Resources/AppIcon.png`), built into `AppIcon.icns` by `build.sh`.
+
+See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
 ## Requirements
-- macOS 14 or later (Apple silicon)
+
+- macOS 14 or later (Apple Silicon)
 - Xcode Command Line Tools / Swift 6 (`xcode-select --install`)
-- Python 3 (the collectors use only the standard library)
+- Python 3 (collectors use only the standard library)
 
 ## Build and install
-    ./build.sh
-    open ~/Applications/AgentUsageBar.app
 
-The app is ad-hoc signed and built locally, so Gatekeeper does not quarantine it.
-Set `INSTALL_DIR` to install somewhere other than `~/Applications`.
+```bash
+./build.sh
+open ~/Applications/AgentUsageBar.app
+```
+
+The app is ad-hoc signed and built locally, so Gatekeeper does not quarantine it. Set `INSTALL_DIR` to install somewhere other than `~/Applications`.
 
 ## Updating
-The app checks github.com once a day (and when it starts) for a newer release, and
-only tells you: the popover shows "Update available: vX.Y.Z", a "What's new" link and
-an **Update** button. You can turn the daily check off with "Check for updates" in
-the popover. Nothing is installed without your confirmation. The confirmation names
-the version and the short commit of its tag. Pressing Update then downloads that
-release's source into `~/Library/Application Support/AgentUsageBar/src`, **runs its
-build script (`build.sh`) with your permissions on your Mac**, runs the new build's
-`--version` and `--selftest`, and only then restarts into it. If any step fails, the
-current app is left alone and the popover shows the error and the log
-(`~/Library/Logs/AgentUsageBar/update.log`).
 
-- **Requirements:** git and the Xcode Command Line Tools (`xcode-select --install`).
-  Without them the popover only links to the release.
-- **Trust:** the update runs code from the repository, exactly as running
-  `./build.sh` yourself would. Only update if you trust the repo you built from
-  (forks update from their own repo). The download uses https only and ignores your
-  own git configuration (rewrites, hooks, credential helpers). Checking signed tags
-  is a possible future hardening; it is not done today.
-- **Roll back:** the version you replaced is kept at
-  `~/Library/Application Support/AgentUsageBar/previous/AgentUsageBar.app` (not in
-  your Applications folder). Quit the app, move that copy to where the app was
-  (replacing the new one) and open it. The backup copy cannot update itself; it
-  says so. If the new app does not start, the update puts the backup back by itself.
-- **Turn checks off:** switch off "Check for updates" in the popover. The "Check now"
-  button still works when you press it.
+The app checks `github.com` when it starts and once a day for a newer release, and only notifies you: the popover shows **Update available: vX.Y.Z**, a **What's new** link, and an **Update** button. Nothing is installed without your confirmation. The confirmation dialog names the release tag and the short commit SHA it will build:
+
+<p align="center">
+  <img src="docs/update-confirm.png" width="480" alt="Native macOS update confirmation dialog displaying the Agent Usage Bar icon, target version v0.3.0 (commit 7306167), build-script permissions notice, backup path, Cancel button, and Update and Restart button">
+</p>
+
+Pressing **Update and Restart** downloads that release's source into `~/Library/Application Support/AgentUsageBar/src`, verifies the tag still points to the confirmed commit before checking it out, **runs its build script (`build.sh`) with your permissions on your Mac**, checks the staged build's `--version` and `--selftest`, and only then swaps and restarts into it. If any step fails, the current app stays untouched and the popover shows the error and log path (`~/Library/Logs/AgentUsageBar/update.log`).
+
+- **Requirements:** `git` and Xcode Command Line Tools (`xcode-select --install`). Without them, the popover only links to the release page.
+- **Trust:** Updating builds and runs code from the repository, the same as running `./build.sh` yourself. Only update if you trust the repository you built from (forks update from their own repo). Downloads use HTTPS only and ignore your own git configuration (URL rewrites, hooks, fsmonitor, credential helpers). Checking signed tags is not done today.
+- **Safety & rollback:** Only one update can run at a time, and the swap refuses to proceed if another copy of the installed app is still running. The version you replaced is kept at `~/Library/Application Support/AgentUsageBar/previous/AgentUsageBar.app` (outside `~/Applications`). The backup copy cannot update itself or take over Launch at login. If the new app fails to stay running, the swap helper restores the backup automatically. To roll back manually, quit the app, move the backup bundle over `~/Applications/AgentUsageBar.app`, and open it.
+- **Post-update housekeeping:** After an update, the app re-enables **Launch at login** if you had it on and macOS dropped it, and clears the checkout's build cache (`src/App/.build`).
+- **Turn checks off:** Switch off **Check for updates** in the popover. **Check now** still works on demand.
 - **By hand:** `git pull && ./build.sh` still works, then quit and reopen the app.
 
-See [CHANGELOG.md](CHANGELOG.md) for what changed. `AgentUsageBar --version` prints
-the installed version.
+See [CHANGELOG.md](CHANGELOG.md) for what changed. Run `~/Applications/AgentUsageBar.app/Contents/MacOS/AgentUsageBar --version` to print the installed version.
 
 ## Supported agents
-- **Claude Code**: reads its sign-in from the login Keychain item
-  `Claude Code-credentials`, or `~/.claude/.credentials.json`. The token is used
-  for one request and never printed or stored.
-- **Antigravity CLI** (`agy`).
 
-On first run macOS asks whether `security` may access the Keychain item. Choose
-**Always Allow** so it does not ask on every refresh.
+- **Claude Code:** Reads its sign-in from the login Keychain item `Claude Code-credentials`, or `~/.claude/.credentials.json`. The token is used for a single request and never printed or stored.
+- **Antigravity CLI (`agy`):** Reads both the headline **Gemini models** pool and the grouped **Claude & GPT models** pool.
 
-The menu bar label shows only the agents this Mac has set up (ready), side by side:
-its logo and the percentage of its 5-hour session limit used (for example
-`[claude] 7%  [agy] 18%`; a Claude-only Mac shows just `[claude] 7%`). If none is ready
-it shows one neutral logo with `–`. The popover tabs follow the same rule, and with
-nothing ready it shows the sign-in instructions. A number turns red at 90%. Click anywhere on the
-label for the full popover with weekly windows and details. The app refreshes every 15 minutes
-(3 minutes when any limit is at 90% or more) and turns red at 90%.
-"Launch at login" is on by default; toggle it in the popover.
+On first run macOS asks whether `security` may access the Keychain item. Choose **Always Allow** so it does not prompt on every refresh.
+
+- **Menu bar:** Displays only the agents configured (`ready`) on this Mac side by side — each logo with its **5-hour session** percentage used (for example, Claude `34%` and Antigravity `12%`; a Claude-only Mac shows only Claude). If none is ready, it shows one neutral logo with `–`. A session number turns **red at 90% or more**.
+- **Popover:** Click anywhere on the menu bar label to open the popover (opens on the busiest ready agent; switcher tabs show each ready provider's highest headline limit, and with nothing ready it shows the sign-in instructions). Shows 5-hour and weekly meters with live reset countdowns, Antigravity's grouped **Claude & GPT models** section, a 7-day token chart, and top models.
+- **Refresh & startup:** Refreshes every **15 minutes** (every **3 minutes** when any headline limit reaches **90% or more**). **Launch at login** is on by default and can be toggled in the popover.
 
 ## Icons
-Claude and Antigravity logos ship as defaults (see Trademarks below). Lookup order:
+
+Claude and Antigravity monochrome template icons ship as defaults (see [Trademarks](#trademarks) below). Lookup order:
 
 1. `~/.config/agent-usage-bar/icons/<id>-template.svg` (your override)
-2. the bundled `<id>-template.svg`
-3. an SF Symbol fallback
+2. The bundled `<id>-template.svg`
+3. An SF Symbol fallback
 
-`<id>` is `claude` or `agy` (the file name of the usage JSON). All are loaded as
-template images, so they follow the menu bar colours. Restart the app after adding an override.
+`<id>` matches the usage JSON filename (`claude`, `agy`, or any custom collector). Icons load as template images so they follow the menu bar appearance automatically. Restart the app after adding an override.
 
 ## Trademarks
+
 Claude and the Claude logo are trademarks of Anthropic, PBC. Antigravity and its logo are trademarks of Google LLC. They are used only to identify the services this app reads usage from. This project is not affiliated with or endorsed by either company, and the logo files are not covered by the MIT licence.
 
 ## Settings (environment variables)
-- `AGENT_USAGE_DIR`: where usage JSON files are written and read. Default:
-  `~/.local/state/agent-usage-bar/usage`. Set it to
-  `~/.local/state/omarchy/agents/usage` for Omarchy-schema compatibility.
-- `XDG_STATE_HOME`, `XDG_CACHE_HOME`: change the default state/cache locations.
-- Extra collectors: executable files named `agent-usage-<id>` in
-  `~/.config/agent-usage-bar/collectors/` are run too; they should write `<id>.json`.
+
+- `AGENT_USAGE_DIR`: Where usage JSON files are written and read (default: `~/.local/state/agent-usage-bar/usage`). Set it to `~/.local/state/omarchy/agents/usage` for Omarchy-schema compatibility.
+- `XDG_STATE_HOME`, `XDG_CACHE_HOME`: Override the default state and cache locations.
+- **Extra collectors:** Executable files named `agent-usage-<id>` in `~/.config/agent-usage-bar/collectors/` run alongside the bundled collectors and should write `<id>.json`.
 
 ## Demo mode
-Try it with synthetic data and no sign-in:
 
-    ~/Applications/AgentUsageBar.app/Contents/MacOS/AgentUsageBar --demo
+Try the app with synthetic data and no sign-in:
 
-or `AGENT_USAGE_DIR=$PWD/docs/demo` (any folder named `demo` never runs collectors).
+```bash
+~/Applications/AgentUsageBar.app/Contents/MacOS/AgentUsageBar --demo
+```
+
+Or point `AGENT_USAGE_DIR=$PWD/docs/demo` (any folder named `demo` never runs collectors).
 
 ## Checks
-    swift build --package-path App && App/.build/debug/AgentUsageBar --selftest
-    collectors/agent-usage-claude --print
-    collectors/agent-usage-agy --print
+
+```bash
+swift build --package-path App && App/.build/debug/AgentUsageBar --selftest
+collectors/agent-usage-claude --print
+collectors/agent-usage-agy --print
+```
 
 ## Uninstall
-Turn off "Launch at login" in the popover first, then:
 
-    osascript -e 'quit app "AgentUsageBar"'
-    rm -rf ~/Applications/AgentUsageBar.app
-    rm -rf ~/.cache/agent-usage-bar ~/.local/state/agent-usage-bar ~/.config/agent-usage-bar
+Turn off **Launch at login** in the popover first, then:
+
+```bash
+osascript -e 'quit app "AgentUsageBar"'
+rm -rf ~/Applications/AgentUsageBar.app
+rm -rf ~/.cache/agent-usage-bar ~/.local/state/agent-usage-bar ~/.config/agent-usage-bar
+rm -rf ~/Library/Application\ Support/AgentUsageBar ~/Library/Logs/AgentUsageBar
+```
 
 ## Versioning
-The `VERSION` file is the single source of truth: line 1 is the version, line 2
-the build number. `build.sh` writes both into the app's Info.plist and generates
-`App/Sources/AgentUsageBar/Version.swift` (used by `--version`). Bump `VERSION`,
-add a CHANGELOG entry, then build.
+
+`VERSION` is the single source of truth: line 1 is the version, line 2 is the build number. `build.sh` writes both into `Info.plist` and generates `App/Sources/AgentUsageBar/Version.swift` (used by `--version`). Bump `VERSION`, add a `CHANGELOG.md` entry, then build.
 
 ## Built by
+
 Built as a pair in Big Brain mode:
-- **Claude Opus** (left hemisphere): SwiftUI/AppKit menu bar app, Claude collector, and releases.
-- **Antigravity / Gemini as Neon** (right hemisphere): Antigravity collector, monochrome template icons, live screen verification, and the v0.2.1 fix.
+
+- **Claude Opus** (left hemisphere): SwiftUI/AppKit menu bar app, Claude collector, multi-pool UI, self-updater implementation & hardening, and releases.
+- **Antigravity / Gemini as Neon** (right hemisphere): Antigravity collector, original app icon & visual design, monochrome template icons, security/correctness reviews, and live screen verification.
 
 We split work by strength, challenged each other's designs, and verified UI and collector changes live on screen to catch regressions before release.
 
 ## License
+
 MIT, see [LICENSE](LICENSE). See [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md).
