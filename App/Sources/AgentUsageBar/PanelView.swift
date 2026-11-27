@@ -29,7 +29,7 @@ struct PanelView: View {
                     Spacer()
                     GearButton(size: 24, radius: 7) { store.showingSettings = true }
                 }
-            } else if store.visibleProviders.isEmpty {
+            } else if store.allBarsHidden {
                 // Every bar is switched off in Settings: say so, don't show sign-in help.
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 8) {

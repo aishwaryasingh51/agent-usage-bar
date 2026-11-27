@@ -13,10 +13,10 @@ final class Store: ObservableObject {
     /// True while the popover shows the Settings page instead of the usage panel (reset when it closes).
     @Published var showingSettings = false
     /// Usage bars the user turned off, as "<provider id>|<window id>". Empty = all on, so new bars appear by default.
-    @Published private(set) var hiddenLimitKeys: Set<String> = Set(UserDefaults.standard.stringArray(forKey: Store.hiddenKeysPref) ?? [])
+    @Published private(set) var hiddenLimitKeys: Set<String> = Store.demo ? [] : Set(UserDefaults.standard.stringArray(forKey: Store.hiddenKeysPref) ?? [])
     private static let hiddenKeysPref = "hiddenLimitKeys"
     /// Weekly pace projection on/off (default on). Not persisted in demo runs.
-    @Published private(set) var showProjection: Bool = UserDefaults.standard.object(forKey: Store.projectionPref) as? Bool ?? true
+    @Published private(set) var showProjection: Bool = Store.demo ? true : (UserDefaults.standard.object(forKey: Store.projectionPref) as? Bool ?? true)
     private static let projectionPref = "showWeeklyProjection"
     /// Per-window usage history for the pace projection. Never read or written in demo mode.
     private var history: [String: WindowLog] = [:]
@@ -77,6 +77,9 @@ final class Store: ObservableObject {
     /// Providers with the user's hidden bars removed; a provider with every bar hidden is dropped.
     /// Drives the switcher, panel and menu bar. Never use it for the Settings page.
     var visibleProviders: [Provider] { Visibility.visible(providers, hidden: hiddenLimitKeys) }
+    /// True when the user has hidden every bar of every provider that could show one: the panel then says
+    /// so instead of showing sign-in help for barless/not-installed providers.
+    var allBarsHidden: Bool { Visibility.allHidden(providers, visible: visibleProviders) }
     /// Raw providers that have bars, for the Settings page: unaffected by hiding, so nothing can get stuck hidden.
     var settingsProviders: [Provider] { Visibility.configurable(providers) }
 

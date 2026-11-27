@@ -258,7 +258,14 @@ enum Visibility {
         providers.filter { !($0.limits ?? []).isEmpty }
     }
 
-    static let selfTestCount = 12
+    /// All hidden: nothing is left to show, yet a provider that is ready (or expired-but-tabbed) existed.
+    /// Barless not-installed stubs must not keep the panel on sign-in help.
+    static func allHidden(_ providers: [Provider], visible: [Provider]) -> Bool {
+        let tabs = visible.filter { $0.ready != false || $0.signInExpired }
+        return tabs.isEmpty && providers.contains { $0.ready != false || $0.signInExpired }
+    }
+
+    static let selfTestCount = 14
 
     static func selfTest() -> [String] {
         let far = "2099-01-01T00:00:00Z"
@@ -294,6 +301,10 @@ enum Visibility {
         let v3 = visible([hotHidden], hidden: [key("h", hotHidden.limits![0])])
         check(v3.first?.maxPercent(now: now) == 0.1, "alarm and switcher % ignore hidden bars")
         check(visible([prov("n", "[]")], hidden: [sessKey]).map(\.id) == ["n"], "provider with no limits is never dropped")
+        let stub = try! JSONDecoder().decode(Provider.self, from: Data(#"{"id":"agy","ready":false,"limits":[]}"#.utf8))
+        let hiddenAll = visible([a, stub], hidden: [sessKey, weekKey])
+        check(allHidden([a, stub], visible: hiddenAll), "ready provider all hidden + barless stub still gives the all-hidden state")
+        check(!allHidden([stub], visible: visible([stub], hidden: [])), "only a not-ready stub is not 'all hidden'")
         return fails
     }
 }

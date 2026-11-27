@@ -116,7 +116,7 @@ private struct GeneralSettings: View {
             if let b = u.busy { Text(b).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
             else if let s = u.status { Text(s).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
             else if let tag = u.latest { Text("Update available: \(tag)").font(.caption).foregroundStyle(.secondary).lineLimit(1) }
-            else { Text("v\(u.current)").font(.caption).foregroundStyle(.secondary) }
+            else { Text(u.checkEnabled ? "Checks daily" : "Automatic checks off").font(.caption).foregroundStyle(.secondary) }
             Spacer()
             if u.latest != nil, u.prereqProblem == nil, u.busy == nil { Button("Update") { u.requestUpdate() }.controlSize(.small) }
             Button("Check now") { u.check(manual: true) }
