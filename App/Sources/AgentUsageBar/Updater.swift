@@ -265,7 +265,7 @@ enum Shell {
 enum Updater {
     static let defaultSlug = "aishwaryasingh51/agent-usage-bar"
     static let selfTestCount = versionCases.count + tagCases.count + locationCases.count + remoteCases.count + refusalCases.count + slugCases.count
-        + backupCases.count + 2
+        + backupCases.count + 4
 
     static func arg(_ name: String) -> String? {
         let a = CommandLine.arguments
@@ -367,6 +367,14 @@ enum Updater {
         return path
     }
 
+    /// CFBundleShortVersionString read straight from Contents/Info.plist. Bundle(url:) caches per path within a process,
+    /// so a retry at the same staging path would see a stale version.
+    static func plistVersion(ofBundle bundle: URL) -> String? {
+        guard let data = try? Data(contentsOf: bundle.appendingPathComponent("Contents/Info.plist")),
+              let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] else { return nil }
+        return plist["CFBundleShortVersionString"] as? String
+    }
+
     static let backupMessage = "This is the backup copy. Open AgentUsageBar.app to update."
 
     /// True when the bundle at `bundle` is the saved backup (inside <support>/previous) or is named like one.
@@ -374,16 +382,19 @@ enum Updater {
     static func isBackupCopy(bundle: String, backupDir: String) -> Bool {
         let b = URL(fileURLWithPath: bundle).standardizedFileURL
         if b.lastPathComponent.hasSuffix(".previous.app") { return true }
-        let dir = URL(fileURLWithPath: backupDir).standardizedFileURL.path
-        return b.deletingLastPathComponent().path == dir
+        let dir = URL(fileURLWithPath: backupDir).standardizedFileURL.resolvingSymlinksInPath().path
+        return b.deletingLastPathComponent().resolvingSymlinksInPath().path == dir
     }
-    static var runningFromBackup: Bool { isBackupCopy(bundle: Bundle.main.bundleURL.path, backupDir: UpdatePaths.backupDir.path) }
+    /// The installed bundle with symlinks resolved (the app may be reached through a symlink). Use this everywhere the
+    /// bundle path is compared, checked or handed to the swap helper.
+    static var installedBundleURL: URL { Bundle.main.bundleURL.standardizedFileURL.resolvingSymlinksInPath() }
+    static var runningFromBackup: Bool { isBackupCopy(bundle: installedBundleURL.path, backupDir: UpdatePaths.backupDir.path) }
 
     /// Why in-app updating is unavailable on this Mac (nil = available). Blocking: call off the main thread.
     static func prerequisiteProblem() -> String? {
         if runningFromBackup { return backupMessage }
         if gitPath() == nil { return toolsMessage }
-        let bundle = Bundle.main.bundleURL
+        let bundle = installedBundleURL
         guard bundle.pathExtension == "app" else { return "Updating in-app needs the installed app (built with build.sh)." }
         guard FileManager.default.isWritableFile(atPath: bundle.deletingLastPathComponent().path) else {
             return "The app's folder isn't writable, so it can't replace itself. Update with git pull && ./build.sh."
@@ -477,7 +488,7 @@ enum Updater {
         guard v.ok, reported == "Agent Usage Bar \(want2)" else {
             throw UpdateError("The new build reports \"\(lastLine(reported))\" instead of version \(want2).")
         }
-        let plistVersion = Bundle(url: staged)?.infoDictionary?["CFBundleShortVersionString"] as? String
+        let plistVersion = plistVersion(ofBundle: staged)
         guard plistVersion == want2 else { throw UpdateError("The new build's Info.plist version (\(plistVersion ?? "none")) does not match \(want2).") }
         let t = Shell.run(bin, ["--selftest"], env: benv, timeout: 90)
         guard t.ok else { throw UpdateError("The new build failed its own self-test: " + lastLine(t.output)) }
@@ -613,7 +624,7 @@ enum Updater {
 
     /// Copies the helper next to the checkout and starts it detached (new session, no stdio). The caller then quits the app.
     static func launchSwap(staged: URL) throws {
-        let installed = Bundle.main.bundleURL
+        let installed = installedBundleURL
         guard installed.pathExtension == "app" else { throw UpdateError("Not running from an app bundle; cannot replace myself.") }
         guard !runningFromBackup else { throw UpdateError(backupMessage) }
         guard installed.lastPathComponent == "AgentUsageBar.app" else { throw UpdateError("The app is not named AgentUsageBar.app, so it can't replace itself.") }
@@ -626,8 +637,10 @@ enum Updater {
         }
         let fm = FileManager.default
         try fm.createDirectory(at: UpdatePaths.support, withIntermediateDirectories: true)
-        var isDir: ObjCBool = false
-        if fm.fileExists(atPath: UpdatePaths.helper.path, isDirectory: &isDir), !isDir.boolValue { try fm.removeItem(at: UpdatePaths.helper) }
+        // attributesOfItem does not follow symlinks, so a dangling symlink at the helper path is seen (fileExists says "absent").
+        if let attrs = try? fm.attributesOfItem(atPath: UpdatePaths.helper.path), (attrs[.type] as? FileAttributeType) != .typeDirectory {
+            try fm.removeItem(at: UpdatePaths.helper)
+        }
         try fm.copyItem(at: res, to: UpdatePaths.helper)
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: UpdatePaths.helper.path)
 
@@ -771,9 +784,45 @@ enum Updater {
         ("/Users/x/Library/Application Support/AgentUsageBar/previous/../AgentUsageBar.app", "/Users/x/Library/Application Support/AgentUsageBar/previous", false),
     ]
 
+    /// Two reads of an Info.plist at the same path must each see the file as it is then (no per-path caching).
+    static func plistReadSelfTest() -> [String] {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("aub-plist-\(UUID().uuidString).app")
+        defer { try? fm.removeItem(at: dir) }
+        do { try fm.createDirectory(at: dir.appendingPathComponent("Contents"), withIntermediateDirectories: true) }
+        catch { return ["plist read: could not create temp bundle"] }
+        var f: [String] = []
+        for v in ["1.0.0", "2.0.0"] {
+            let d = try? PropertyListSerialization.data(fromPropertyList: ["CFBundleShortVersionString": v], format: .xml, options: 0)
+            do { try d?.write(to: dir.appendingPathComponent("Contents/Info.plist")) } catch { f.append("plist read: write failed"); continue }
+            let got = plistVersion(ofBundle: dir)
+            if got != v { f.append("plist read: got \(got ?? "nil"), want \(v)") }
+        }
+        return f
+    }
+
+    /// A backup dir reached through a symlink must still match the real bundle path (and vice versa).
+    static func symlinkBackupSelfTest() -> [String] {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("aub-link-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: root) }
+        let real = root.appendingPathComponent("real"), link = root.appendingPathComponent("link")
+        do {
+            try fm.createDirectory(at: real.appendingPathComponent("previous"), withIntermediateDirectories: true)
+            try fm.createSymbolicLink(at: link, withDestinationURL: real)
+        } catch { return ["symlink backup: could not set up temp dirs"] }
+        let app = real.appendingPathComponent("previous/AgentUsageBar.app").path
+        var f: [String] = []
+        if !isBackupCopy(bundle: app, backupDir: link.appendingPathComponent("previous").path) { f.append("symlink backup: real bundle vs linked dir") }
+        if !isBackupCopy(bundle: link.appendingPathComponent("previous/AgentUsageBar.app").path, backupDir: real.appendingPathComponent("previous").path) { f.append("symlink backup: linked bundle vs real dir") }
+        return f
+    }
+
     static func selfTest() -> [String] {
         var f: [String] = []
         for (b, d, want) in backupCases where isBackupCopy(bundle: b, backupDir: d) != want { f.append("backup \(b): want \(want)") }
+        f += plistReadSelfTest()
+        f += symlinkBackupSelfTest()
         if friendlyCheckError(URLError(.notConnectedToInternet)) != "Couldn't reach GitHub. Check your connection." { f.append("friendly error: network") }
         if friendlyCheckError(UpdateError("No releases published yet.")) != "Couldn't check: No releases published yet." { f.append("friendly error: other") }
         for (a, b, want) in versionCases where SemVer.isNewer(a, than: b) != want { f.append("semver \(a) > \(b): want \(want)") }

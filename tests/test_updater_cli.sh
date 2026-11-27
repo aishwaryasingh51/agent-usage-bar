@@ -6,10 +6,10 @@
 #
 # <test-build.app>   built with   AUB_TEST_BUILD=1 INSTALL_DIR=<dir> ./build.sh
 # <normal-build.app> built with   INSTALL_DIR=<dir> ./build.sh
-# source-repo        a local clone that has the tag (default ~/Documents/agent-usage-bar, tag v0.2.2)
+# source-repo        a local clone that has the tag (default ~/Documents/agent-usage-bar, tag v<VERSION file>)
 set -u
 TESTAPP="${1:?test-build .app}"; NORMAL="${2:?normal-build .app}"
-SRC="${3:-$HOME/Documents/agent-usage-bar}"; TAG="${4:-v0.2.2}"
+SRC="${3:-$HOME/Documents/agent-usage-bar}"; TAG="${4:-v$(sed -n 1p "$(dirname "$0")/../VERSION")}"
 TB="$TESTAPP/Contents/MacOS/AgentUsageBar"; NB="$NORMAL/Contents/MacOS/AgentUsageBar"
 W="$(mktemp -d "${TMPDIR:-/tmp}/aub-cli-test.XXXXXX")"; W="$(cd "$W" && pwd -P)"
 trap 'rm -rf "$W"' EXIT
@@ -25,6 +25,18 @@ for b in "$TB" "$NB"; do
   check "--check-icons" '"$b" --check-icons | grep -q "claude:"'
 done
 
+# --- --help / -h print usage and exit 0 without starting the GUI (guarded: kill after 10s)
+for flag in --help -h; do
+  for b in "$TB" "$NB"; do
+    "$b" "$flag" >"$W/help.out" 2>&1 & hp=$!
+    ( sleep 10; kill -9 $hp 2>/dev/null ) & wd=$!
+    wait $hp; rc=$?
+    pkill -P $wd 2>/dev/null; kill $wd 2>/dev/null; wait $wd 2>/dev/null
+    [ "$b" = "$TB" ] && lbl=test || lbl=normal
+    check "$lbl build $flag: usage, exit 0" '[ $rc = 0 ] && grep -q "^Usage: AgentUsageBar" "$W/help.out"'
+  done
+done
+
 # --- release build has no test hooks compiled in (and its CLI ignores them)
 # (Short literals such as AUB_SUPPORT_DIR are stored inline by Swift, so only longer ones are greppable;
 # the behavioural check below covers AUB_UPDATE_REPO and --fake-version.)
@@ -37,7 +49,7 @@ check "normal build ignores AUB_UPDATE_REPO and --fake-version" 'echo "$out" | g
 
 # --- update check against the real repo (network)
 out="$("$TB" --update-check 2>&1)"; echo "$out" | sed 's/^/     /'
-check "update-check: latest v0.2.2" 'echo "$out" | grep -q "latest: v0.2.2"'
+check "update-check: reports a latest tag" 'echo "$out" | grep -Eq "^latest: v[0-9]+\.[0-9]+\.[0-9]+"'
 out="$("$TB" --update-check --fake-version 0.2.1 2>&1)"
 check "update-check with --fake-version 0.2.1: newer yes" 'echo "$out" | grep -q "newer: yes"'
 
