@@ -26,6 +26,10 @@ struct SettingsView: View {
                 SettingsCard { ProviderBars(provider: p) }
             }
 
+            SettingsCard {
+                SettingsToggleRow(title: "Projected weekly pace", isOn: Binding(get: { store.showProjection }, set: { store.setShowProjection($0) }))
+            }
+
             SectionLabel("General")
             SettingsCard { GeneralSettings() }
         }

@@ -15,6 +15,11 @@ final class Store: ObservableObject {
     /// Usage bars the user turned off, as "<provider id>|<window id>". Empty = all on, so new bars appear by default.
     @Published private(set) var hiddenLimitKeys: Set<String> = Set(UserDefaults.standard.stringArray(forKey: Store.hiddenKeysPref) ?? [])
     private static let hiddenKeysPref = "hiddenLimitKeys"
+    /// Weekly pace projection on/off (default on). Not persisted in demo runs.
+    @Published private(set) var showProjection: Bool = UserDefaults.standard.object(forKey: Store.projectionPref) as? Bool ?? true
+    private static let projectionPref = "showWeeklyProjection"
+    /// Per-window usage history for the pace projection. Never read or written in demo mode.
+    private var history: [String: WindowLog] = [:]
 
     /// True when launched with `--demo`: reads bundled synthetic data, runs no collectors.
     /// Also true when AGENT_USAGE_DIR points at a folder named "demo", so collectors never overwrite it.
@@ -55,7 +60,7 @@ final class Store: ObservableObject {
 
     init() {
         if !Self.demo { try? FileManager.default.createDirectory(at: Self.usageDir, withIntermediateDirectories: true) }
-        if !Self.demo { setupLaunchAtLogin() }
+        if !Self.demo { setupLaunchAtLogin(); history = Projection.load() }
         reload()
         // Poll the usage dir every 5s so new/changed files appear live.
         pollTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
@@ -130,6 +135,36 @@ final class Store: ObservableObject {
         // Claude first, then alphabetical.
         providers = out.sorted { ($0.id == "claude" ? "" : $0.id) < ($1.id == "claude" ? "" : $1.id) }
         now = Date()
+        recordHistory()
+    }
+
+    // MARK: Weekly pace
+
+    func setShowProjection(_ on: Bool) {
+        showProjection = on
+        if !Self.demo { UserDefaults.standard.set(on, forKey: Self.projectionPref) }
+    }
+
+    private func recordHistory() {
+        guard !Self.demo else { return }
+        var changed = false
+        let t = Date().timeIntervalSince1970
+        for p in providers {
+            for w in p.limits ?? [] where Projection.applies(w) {
+                guard let pct = w.percent, pct >= 0, let r = w.resetDate, r.timeIntervalSince1970 > t else { continue }
+                let key = Visibility.key(p.id, w)
+                var log = history[key] ?? WindowLog()
+                if log.record(percent: pct, resetsAt: r.timeIntervalSince1970, now: t) { history[key] = log; changed = true }
+            }
+        }
+        if changed { Projection.save(history) }
+    }
+
+    /// Pace for a weekly bar, or nil (toggle off, not weekly, or a quiet gate). Demo = pure week-to-date pace.
+    func projection(provider: String, window w: LimitWindow, percent: Double, now: Date) -> Projection.Result? {
+        guard showProjection, Projection.applies(w), let r = w.resetDate else { return nil }
+        let samples = Self.demo ? [] : (history[Visibility.key(provider, w)]?.samples ?? [])
+        return Projection.compute(percent: percent, reset: r, now: now, samples: samples)
     }
 
     // MARK: Collectors

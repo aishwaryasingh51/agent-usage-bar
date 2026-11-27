@@ -167,11 +167,12 @@ struct Provider: Decodable, Identifiable {
         fails += LabelItem.selfTest()
         fails += expiredSelfTest()
         fails += Visibility.selfTest()
+        fails += Projection.selfTest()
         fails += Updater.selfTest()
         return fails
     }
 
-    static let selfTestCount = 8 + 8 + 5 + 3 + 6 + 3 + 3 + Visibility.selfTestCount + Updater.selfTestCount
+    static let selfTestCount = 8 + 8 + 5 + 3 + 6 + 3 + 3 + Visibility.selfTestCount + Projection.selfTestCount + Updater.selfTestCount
 
     /// Not ready because the sign-in expired (user has the plan): kept as a popover tab, never in the bar label.
     var signInExpired: Bool {

@@ -193,13 +193,13 @@ struct ProviderSection: View {
                 Text(heading).font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.top, 2)
             }
             ForEach(mainWindows, id: \.0.id) { w, pct in
-                LimitRow(window: w, percent: pct, now: now)
+                LimitRow(window: w, percent: pct, now: now, projection: store.projection(provider: provider.id, window: w, percent: pct, now: now))
             }
             ForEach(provider.groupedWindows(now: now), id: \.name) { group in
                 VStack(alignment: .leading, spacing: 8) {
                     Text(group.name).font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.top, 2)
                     ForEach(group.windows, id: \.0.id) { w, pct in
-                        LimitRow(window: w, percent: pct, now: now)
+                        LimitRow(window: w, percent: pct, now: now, projection: store.projection(provider: provider.id, window: w, percent: pct, now: now))
                     }
                 }
             }
@@ -252,6 +252,8 @@ struct LimitRow: View {
     let window: LimitWindow
     let percent: Double
     let now: Date
+    /// Weekly pace, when this bar has one; drawn inside the meter and on the reset row (no extra height).
+    var projection: Projection.Result?
 
     var body: some View {
         let alarming = percent >= 0.9
@@ -263,10 +265,17 @@ struct LimitRow: View {
                     .font(.subheadline.monospacedDigit())
                     .foregroundStyle(alarming ? Color.red : Color.primary)
             }
-            Meter(value: min(1, percent), alarming: alarming)
+            Meter(value: min(1, percent), alarming: alarming, projected: projection?.projected)
             if let r = window.resetDate, r > now {
-                Text("Resets in " + Fmt.duration(r.timeIntervalSince(now)))
-                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Text("Resets in " + Fmt.duration(r.timeIntervalSince(now)))
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    if let pr = projection {
+                        Text(Projection.label(pr, now: now)).font(.caption)
+                            .foregroundStyle(pr.over ? Color.orange : Color.secondary)
+                    }
+                }
             } else if window.isGrouped, (window.resetsAt ?? "").isEmpty, percent == 0 {
                 Text("Not used yet").font(.caption).foregroundStyle(.secondary)
             }
@@ -277,12 +286,23 @@ struct LimitRow: View {
 struct Meter: View {
     let value: Double
     let alarming: Bool
+    /// Projected fraction at reset (unclamped); draws a ghost continuation from `value` and a tick.
+    var projected: Double?
     var body: some View {
         GeometryReader { g in
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.primary.opacity(0.12))
+                if let pj = projected, pj > value {
+                    Capsule().fill(pj > 1.0 ? Color.orange.opacity(0.35) : Color.accentColor.opacity(0.28))
+                        .frame(width: g.size.width * min(1, pj))
+                }
                 Capsule().fill(alarming ? Color.red : Color.accentColor)
                     .frame(width: max(value > 0 ? 4 : 0, g.size.width * value))
+                if let pj = projected, pj > value, pj < 0.99 {
+                    RoundedRectangle(cornerRadius: 0.75).fill(Color.primary.opacity(0.45))
+                        .frame(width: 1.5, height: 8)
+                        .offset(x: g.size.width * pj - 0.75)
+                }
             }
         }
         .frame(height: 6)
