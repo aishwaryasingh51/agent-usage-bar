@@ -55,6 +55,7 @@ struct AgentUsageBarApp: App {
     // The status item and popover live in AppDelegate (AppKit); SwiftUI only needs a scene.
     var body: some Scene {
         Settings { EmptyView() }
+            .commands { CommandGroup(replacing: .appSettings) {} }
     }
 }
 
@@ -150,6 +151,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             if e.keyCode == 53, let self, self.popover.isShown {
                 // Esc backs out of Settings first; only the main panel closes the popover.
                 if self.store.showingSettings { self.store.showingSettings = false } else { self.popover.performClose(nil) }
+                return nil
+            }
+            if let self, self.popover.isShown,
+               e.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+               e.charactersIgnoringModifiers == "," {
+                self.store.showingSettings.toggle()
                 return nil
             }
             return e

@@ -14,6 +14,7 @@ All notable changes to Agent Usage Bar are documented here. The format follows
   ~Thu 14:00". You can turn it off in Settings. It works from a small local
   history file (`history.json`) that never leaves your Mac (demo mode never reads
   or writes it).
+- Press ⌘, to open Settings in the popover.
 
 ### Fixed
 - Antigravity's "Claude and GPT models" pool is now grouped correctly.
@@ -21,6 +22,7 @@ All notable changes to Agent Usage Bar are documented here. The format follows
 - A dangling helper symlink no longer breaks an update.
 - A retried update no longer reads a stale version number.
 - `--help` / `-h` now prints usage instead of hanging.
+- The blank system Settings window no longer appears.
 
 ## [0.3.0] - 2026-11-26
 
