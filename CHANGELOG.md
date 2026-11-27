@@ -3,6 +3,25 @@
 All notable changes to Agent Usage Bar are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.1] - 2026-11-27
+
+### Added
+- A Settings page, opened from the cog in the popover. Each usage bar has its own
+  on/off switch, and the same switches decide what shows in the menu bar.
+  "Launch at login" and "Check for updates" now live there too.
+- Projected weekly pace. Weekly bars show a faint "ghost" extending to where you
+  are likely to be at reset, with a note such as "On pace for ~60%" or "Runs out
+  ~Thu 14:00". You can turn it off in Settings. It works from a small local
+  history file (`history.json`) that never leaves your Mac (demo mode never reads
+  or writes it).
+
+### Fixed
+- Antigravity's "Claude and GPT models" pool is now grouped correctly.
+- Updating from a symlinked install path now works.
+- A dangling helper symlink no longer breaks an update.
+- A retried update no longer reads a stale version number.
+- `--help` / `-h` now prints usage instead of hanging.
+
 ## [0.3.0] - 2026-11-26
 
 ### Added
