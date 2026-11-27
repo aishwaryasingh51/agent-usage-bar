@@ -288,12 +288,14 @@ struct Meter: View {
     let alarming: Bool
     /// Projected fraction at reset (unclamped); draws a ghost continuation from `value` and a tick.
     var projected: Double?
+    @Environment(\.colorScheme) var scheme
     var body: some View {
         GeometryReader { g in
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.primary.opacity(0.12))
                 if let pj = projected, pj > value {
-                    Capsule().fill(pj > 1.0 ? Color.orange.opacity(0.35) : Color.accentColor.opacity(0.28))
+                    Capsule().fill(pj > 1.0 ? Color.orange.opacity(scheme == .dark ? 0.58 : 0.45)
+                                       : (alarming ? Color.red : Color.accentColor).opacity(scheme == .dark ? 0.34 : 0.28))
                         .frame(width: g.size.width * min(1, pj))
                 }
                 Capsule().fill(alarming ? Color.red : Color.accentColor)

@@ -85,7 +85,7 @@ enum Projection {
     static func runOutText(_ runOut: Date, now: Date, calendar: Calendar = .current) -> String {
         let secs = runOut.timeIntervalSince(now)
         if secs < 24 * 3600 {
-            if secs < 3600 { return "Runs out in ~\(max(1, Int((secs / 60).rounded())))m" }
+            if secs < 3570 { return "Runs out in ~\(max(1, Int((secs / 60).rounded())))m" }
             return "Runs out in ~\(Int((secs / 3600).rounded()))h"
         }
         let f = DateFormatter()
@@ -117,7 +117,7 @@ enum Projection {
 
     // MARK: Selftests
 
-    static let selfTestCount = 32
+    static let selfTestCount = 33
 
     static func selfTest() -> [String] {
         var fails: [String] = []
@@ -163,6 +163,7 @@ enum Projection {
         check(runOutText(thu, now: thu.addingTimeInterval(-30 * H), calendar: utc) == "Runs out ~Thu 14:00", "run-out >= 24h shows weekday and time")
         check(runOutText(thu, now: thu.addingTimeInterval(-6 * H), calendar: utc) == "Runs out in ~6h", "run-out < 24h shows hours")
         check(runOutText(thu, now: thu.addingTimeInterval(-30 * 60), calendar: utc) == "Runs out in ~30m", "run-out < 1h shows minutes")
+        check(runOutText(thu, now: thu.addingTimeInterval(-3580), calendar: utc) == "Runs out in ~1h", "run-out at 59m40s shows ~1h, not ~60m")
 
         // History: jitter, reset, throttle, cap
         var log = WindowLog(); let R = 1_900_000_000.0
