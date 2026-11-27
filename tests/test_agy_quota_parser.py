@@ -87,6 +87,114 @@ class ParserTests(unittest.TestCase):
     self.assertEqual(mod.parse_agy_quota_output(None), [])
 
 
+class ExtractLimitsTests(unittest.TestCase):
+  def test_claude_gpt_display_name_normalization_and_third_pool(self):
+    for label in ("Claude and GPT models", "Claude / GPT", "GPT-4o"):
+      with self.subTest(label=label):
+        data = {"groups": [
+          {"displayName": "Gemini models", "buckets": [
+            {"window": "5h", "remainingFraction": 0.9, "resetTime": "2026-11-26T20:14:26Z"}]},
+          {"displayName": label, "buckets": [
+            {"window": "5h", "remainingFraction": 0.6, "resetTime": "2026-11-26T22:00:00Z"}]},
+          {"displayName": "Deep Research", "buckets": [
+            {"window": "weekly", "remainingFraction": 0.25, "resetTime": "2026-12-03T15:14:26Z"}]},
+        ]}
+        out = mod.extract_limits(data)
+        self.assertEqual([(l["title"], l.get("group")) for l in out], [
+          ("Session", None),
+          ("Session", mod.CLAUDE_GPT_GROUP),
+          ("Weekly", "Deep Research"),
+        ])
+        self.assertEqual(out[1]["percent"], 0.4)
+        self.assertEqual(out[2]["percent"], 0.75)
+
+  def test_skips_empty_or_missing_non_gemini_display_name_and_invalid_buckets(self):
+    data = {"groups": [
+      {"displayName": "Gemini models", "buckets": [
+        {"window": "5h", "remainingFraction": 0.8, "resetTime": "2026-11-26T20:14:26Z"}]},
+      {"displayName": "", "buckets": [
+        {"window": "5h", "remainingFraction": 0.2, "resetTime": "2026-11-26T21:00:00Z"}]},
+      {"buckets": [
+        {"window": "weekly", "remainingFraction": 0.3, "resetTime": "2026-12-03T15:14:26Z"}]},
+      {"displayName": "   ", "buckets": [
+        {"window": "5h", "remainingFraction": 0.4, "resetTime": "2026-11-26T21:00:00Z"}]},
+      {"displayName": "Deep Research", "buckets": "not-a-list"},
+    ]}
+    out = mod.extract_limits(data)
+    self.assertEqual(out, [
+      {"label": "Session (5-hour)", "title": "Session", "percent": 0.2, "resetsAt": "2026-11-26T20:14:26Z"}
+    ])
+
+  def test_deduplicates_non_gemini_groups_resolving_to_same_name(self):
+    data = {"groups": [
+      {"displayName": "Gemini", "buckets": [
+        {"window": "5h", "remainingFraction": 0.9, "resetTime": "2026-11-26T20:14:26Z"}]},
+      {"displayName": "Claude and GPT models", "buckets": [
+        {"window": "5h", "remainingFraction": 0.5, "resetTime": "2026-11-26T21:00:00Z"}]},
+      {"displayName": "Deep Research", "buckets": [
+        {"window": "weekly", "remainingFraction": 0.7, "resetTime": "2026-12-03T15:14:26Z"}]},
+      {"displayName": "Claude / GPT", "buckets": [
+        {"window": "5h", "remainingFraction": 0.4, "resetTime": "2026-11-26T22:00:00Z"},
+        {"window": "weekly", "remainingFraction": 0.8, "resetTime": "2026-12-02T21:51:43Z"}]},
+    ]}
+    out = mod.extract_limits(data)
+    keys = [(l.get("group"), l["title"]) for l in out]
+    self.assertEqual(len(keys), len(set(keys)))
+    self.assertEqual(keys, [
+      (None, "Session"),
+      (mod.CLAUDE_GPT_GROUP, "Session"),
+      (mod.CLAUDE_GPT_GROUP, "Weekly"),
+      ("Deep Research", "Weekly"),
+    ])
+    self.assertEqual(out[1]["percent"], 0.6)
+    self.assertEqual(out[2]["percent"], 0.2)
+
+  def test_bucket_classification_and_unknown_windows(self):
+    data = {"groups": [
+      {"displayName": "Gemini", "buckets": [
+        {"window": "", "displayName": "Five Hour Limit", "remainingFraction": 0.75, "resetTime": "2026-11-26T20:14:26Z"},
+        {"window": "monthly", "bucketId": "monthly_cap", "displayName": "Monthly", "remainingFraction": 0.1, "resetTime": "2026-12-31T00:00:00Z"}]},
+      {"displayName": "Claude / GPT", "buckets": [
+        {"window": "", "displayName": "Weekly", "remainingFraction": 0.5, "resetTime": "2026-12-03T15:14:26Z"},
+        {"window": "monthly", "bucketId": "monthly_pool", "displayName": "Monthly", "remainingFraction": 0.2, "resetTime": "2026-12-31T00:00:00Z"}]},
+      {"displayName": "Deep Research", "buckets": [
+        {"window": "custom", "bucketId": "weekly_pool", "remainingFraction": 0.3, "resetTime": "2026-12-03T15:14:26Z"},
+        {"window": "custom", "bucketId": "other", "displayName": "5-hour rolling", "remainingFraction": 0.6, "resetTime": "2026-11-26T21:00:00Z"}]},
+    ]}
+    out = mod.extract_limits(data)
+    self.assertEqual([(l.get("group"), l["title"], l["percent"]) for l in out], [
+      (None, "Session", 0.25),
+      (mod.CLAUDE_GPT_GROUP, "Weekly", 0.5),
+      ("Deep Research", "Session", 0.4),
+      ("Deep Research", "Weekly", 0.7),
+    ])
+
+  def test_only_claude_gpt_group_not_promoted_to_headline(self):
+    data = {"groups": [
+      {"displayName": "Claude and GPT models", "buckets": [
+        {"window": "5h", "remainingFraction": 0.7, "resetTime": "2026-11-26T22:54:05Z"},
+        {"window": "weekly", "remainingFraction": 0.62, "resetTime": "2026-12-02T21:51:43Z"}]},
+    ]}
+    out = mod.extract_limits(data)
+    self.assertEqual(out, [
+      {"title": "Session", "label": "Session (5-hour)", "group": mod.CLAUDE_GPT_GROUP, "percent": 0.3, "resetsAt": "2026-11-26T22:54:05Z"},
+      {"title": "Weekly", "label": "Weekly (7-day)", "group": mod.CLAUDE_GPT_GROUP, "percent": 0.38, "resetsAt": "2026-12-02T21:51:43Z"},
+    ])
+
+  def test_generic_unnamed_group_fallback_for_gemini(self):
+    data = {"groups": [
+      {"displayName": "", "buckets": [
+        {"window": "5h", "remainingFraction": 0.8, "resetTime": "2026-11-26T20:14:26Z"}]},
+      {"displayName": "Claude and GPT models", "buckets": [
+        {"window": "weekly", "remainingFraction": 0.5, "resetTime": "2026-12-02T21:51:43Z"}]},
+    ]}
+    out = mod.extract_limits(data)
+    self.assertEqual([(l.get("group"), l["title"], l["percent"]) for l in out], [
+      (None, "Session", 0.2),
+      (mod.CLAUDE_GPT_GROUP, "Weekly", 0.5),
+    ])
+
+
 class ModelLimitsTests(unittest.TestCase):
   def test_horizon_classification(self):
     now = datetime(2026, 11, 26, 18, 0, 0, tzinfo=timezone.utc)
