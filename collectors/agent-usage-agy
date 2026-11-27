@@ -722,6 +722,32 @@ def listed(data, key):
 
 
 CLAUDE_GPT_GROUP = "Claude & GPT models"
+SESSION_HORIZON_SECONDS = 12 * 3600
+_KINDS = (("Session", "Session (5-hour)"), ("Weekly", "Weekly (7-day)"))
+
+
+def _bucket_kind(bucket):
+  """Classify a quota bucket as 'Session', 'Weekly', or None."""
+  window = str(bucket.get("window") or "").lower()
+  bucket_id = str(bucket.get("bucketId") or "").lower()
+  name = str(bucket.get("displayName") or "").lower()
+  haystack = (window, bucket_id, name)
+  if window == "5h" or any(token in field for field in haystack for token in ("5h", "5-hour", "5 hour", "five", "session")):
+    return "Session"
+  if window == "weekly" or any(token in field for field in haystack for token in ("week", "7d", "7-day")):
+    return "Weekly"
+  return None
+
+
+def _collect_pool(buckets, pool=None):
+  pool = {} if pool is None else pool
+  for bucket in buckets:
+    if not isinstance(bucket, dict) or used(bucket) is None:
+      continue
+    kind = _bucket_kind(bucket)
+    if kind:
+      pool[kind] = bucket
+  return pool
 
 
 def extract_limits(data):
@@ -732,44 +758,43 @@ def extract_limits(data):
     groups = [{"displayName": "Gemini", "buckets": data["buckets"]}]
   if not groups:
     return []
-  gemini = next((g for g in groups if "gemini" in str(g.get("displayName") or "").lower()), groups[0])
-  if not listed(gemini, "buckets"):
+  gemini = next(
+    (g for g in groups if "gemini" in str(g.get("displayName") or "").lower()),
+    next(
+      (g for g in groups if "claude" not in str(g.get("displayName") or "").lower() and "gpt" not in str(g.get("displayName") or "").lower()),
+      None,
+    ),
+  )
+  if gemini is not None and not listed(gemini, "buckets"):
     return None
 
   limits = []
-  session = weekly = None
-  for bucket in gemini.get("buckets") or []:
-    if not isinstance(bucket, dict) or used(bucket) is None:
-      continue
-    window = str(bucket.get("window") or "").lower()
-    bucket_id = str(bucket.get("bucketId") or "").lower()
-    name = str(bucket.get("displayName") or "").lower()
-    if window == "5h" or "5h" in bucket_id or "five" in name:
-      session = bucket
-    elif window == "weekly" or "weekly" in bucket_id or "week" in name:
-      weekly = bucket
-  if session:
-    limits.append({"label": "Session (5-hour)", "title": "Session", "percent": used(session), "resetsAt": reset_of(session)})
-  if weekly:
-    limits.append({"label": "Weekly (7-day)", "title": "Weekly", "percent": used(weekly), "resetsAt": reset_of(weekly)})
+  gemini_pool = _collect_pool((gemini.get("buckets") or []) if gemini is not None else [])
+  for kind, label in _KINDS:
+    if kind in gemini_pool:
+      bucket = gemini_pool[kind]
+      limits.append({"label": label, "title": kind, "percent": used(bucket), "resetsAt": reset_of(bucket)})
 
+  grouped_pools = {}
   for group in groups:
     if group is gemini:
       continue
+    raw_name = str(group.get("displayName") or "").strip()
+    if not raw_name:
+      continue
     buckets = group.get("buckets")
-    pool = {}
-    for bucket in buckets if isinstance(buckets, list) else []:
-      if not isinstance(bucket, dict) or used(bucket) is None:
-        continue
-      pool["Weekly" if "week" in str(bucket.get("window") or bucket.get("bucketId") or "").lower() else "Session"] = bucket
+    if not isinstance(buckets, list):
+      continue
+    low = raw_name.lower()
+    group_name = CLAUDE_GPT_GROUP if ("claude" in low or "gpt" in low) else raw_name
+    _collect_pool(buckets, grouped_pools.setdefault(group_name, {}))
+
+  for group_name, pool in grouped_pools.items():
     for kind, label in _KINDS:
       if kind in pool:
-        limits.append({"title": kind, "label": label, "group": CLAUDE_GPT_GROUP, "percent": used(pool[kind]), "resetsAt": reset_of(pool[kind])})
+        bucket = pool[kind]
+        limits.append({"title": kind, "label": label, "group": group_name, "percent": used(bucket), "resetsAt": reset_of(bucket)})
   return limits
-
-
-SESSION_HORIZON_SECONDS = 12 * 3600
-_KINDS = (("Session", "Session (5-hour)"), ("Weekly", "Weekly (7-day)"))
 
 
 def gemini_model_limits(data, now=None):
