@@ -2,11 +2,12 @@ import SwiftUI
 import AppKit
 import Combine
 
+/// Plain AppKit entry point: no SwiftUI App/Scene, so nothing can open a stray window.
+/// The status item and popover live in AppDelegate.
+@MainActor
 @main
-struct AgentUsageBarApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-
-    init() {
+enum AgentUsageBarMain {
+    static func main() {
         // Debug aid: `AgentUsageBar --snapshot <dir>` renders the popover and bar label to PNGs, then exits.
         let a = CommandLine.arguments
         if a.contains("--help") || a.contains("-h") {
@@ -44,18 +45,11 @@ struct AgentUsageBarApp: App {
         // Hidden test hooks for the self-updater: --update-check, --update-dry-run [--update-source P] [--update-tag vX.Y.Z],
         // --fake-version X.Y.Z, --fake-latest vX.Y.Z (stubbed "update available" for UI tests).
         Updater.runCLIIfRequested()
-        if let i = a.firstIndex(of: "--snapshot"), i + 1 < a.count {
-            let dir = a[i + 1]
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                MainActor.assumeIsolated { Snapshot.write(dir: dir) }
-            }
-        }
-    }
-
-    // The status item and popover live in AppDelegate (AppKit); SwiftUI only needs a scene.
-    var body: some Scene {
-        Settings { EmptyView() }
-            .commands { CommandGroup(replacing: .appSettings) {} }
+        // Pure CLI flags are all handled above, before NSApplication (and the WindowServer) is touched.
+        let app = NSApplication.shared
+        let delegate = AppDelegate()   // NSApplication.delegate is weak: hold it strongly for the whole run
+        app.delegate = delegate
+        withExtendedLifetime(delegate) { app.run() }
     }
 }
 
@@ -82,6 +76,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        installMainMenu()
+
+        // Debug aid: `--snapshot <dir>` renders the popover and bar label to PNGs, then exits.
+        let args = CommandLine.arguments
+        if let i = args.firstIndex(of: "--snapshot"), i + 1 < args.count {
+            let dir = args[i + 1]
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                MainActor.assumeIsolated { Snapshot.write(dir: dir) }
+            }
+        }
 
         host = NSHostingController(rootView: PanelRoot(store: store, updater: updater))
         host.sizingOptions = [.preferredContentSize]
@@ -117,6 +121,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 if CommandLine.arguments.contains("--simulate-outside-click") { self.simulateOutsideClick() }
             } }
         }
+    }
+
+    /// Closing the update alert or the popover must never quit the app.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    /// A pure NSApplication has no main menu, so Cmd+Q / Cmd+C / Cmd+A need one (routed via the responder chain).
+    private func installMainMenu() {
+        let main = NSMenu()
+        let appItem = NSMenuItem(); main.addItem(appItem)
+        let appMenu = NSMenu(); appItem.submenu = appMenu
+        appMenu.addItem(withTitle: "Quit Agent Usage Bar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let editItem = NSMenuItem(); main.addItem(editItem)
+        let edit = NSMenu(title: "Edit"); editItem.submenu = edit
+        edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: "Select All", action: #selector(NSResponder.selectAll(_:)), keyEquivalent: "a")
+        NSApp.mainMenu = main
+    }
+
+    /// Reopening the app (Finder, Spotlight, updater relaunch) shows the panel instead of a window.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        show()
+        return false
     }
 
     private func updateLabel(force: Bool) {

@@ -3,6 +3,13 @@
 All notable changes to Agent Usage Bar are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.2] - 2026-11-28
+
+### Fixed
+- The blank "Agent Usage Bar Settings" window no longer opens at login, after an update, or when reopening the app (0.3.1's fix only removed its menu item).
+- Reopening the app (Finder, Spotlight) now shows the panel.
+- The updater test no longer leaves test copies of the app running.
+
 ## [0.3.1] - 2026-11-27
 
 ### Added
