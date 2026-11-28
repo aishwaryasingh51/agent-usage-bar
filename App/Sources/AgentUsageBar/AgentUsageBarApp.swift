@@ -2,11 +2,11 @@ import SwiftUI
 import AppKit
 import Combine
 
+/// Plain AppKit entry point: no SwiftUI App/Scene, so nothing can open a stray window.
+/// The status item and popover live in AppDelegate.
 @main
-struct AgentUsageBarApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-
-    init() {
+enum AgentUsageBarMain {
+    static func main() {
         // Debug aid: `AgentUsageBar --snapshot <dir>` renders the popover and bar label to PNGs, then exits.
         let a = CommandLine.arguments
         if a.contains("--help") || a.contains("-h") {
@@ -50,12 +50,13 @@ struct AgentUsageBarApp: App {
                 MainActor.assumeIsolated { Snapshot.write(dir: dir) }
             }
         }
-    }
-
-    // The status item and popover live in AppDelegate (AppKit); SwiftUI only needs a scene.
-    var body: some Scene {
-        Settings { EmptyView() }
-            .commands { CommandGroup(replacing: .appSettings) {} }
+        MainActor.assumeIsolated {
+            let app = NSApplication.shared
+            let delegate = AppDelegate()   // strong local: NSApplication.delegate is weak
+            app.delegate = delegate
+            app.run()
+            withExtendedLifetime(delegate) {}
+        }
     }
 }
 
@@ -117,6 +118,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 if CommandLine.arguments.contains("--simulate-outside-click") { self.simulateOutsideClick() }
             } }
         }
+    }
+
+    /// Reopening the app (Finder, Spotlight, updater relaunch) shows the panel instead of a window.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        show()
+        return false
     }
 
     private func updateLabel(force: Bool) {
