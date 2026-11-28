@@ -12,7 +12,7 @@ TESTAPP="${1:?test-build .app}"; NORMAL="${2:?normal-build .app}"
 SRC="${3:-$HOME/Documents/agent-usage-bar}"; TAG="${4:-v$(sed -n 1p "$(dirname "$0")/../VERSION")}"
 TB="$TESTAPP/Contents/MacOS/AgentUsageBar"; NB="$NORMAL/Contents/MacOS/AgentUsageBar"
 W="$(mktemp -d "${TMPDIR:-/tmp}/aub-cli-test.XXXXXX")"; W="$(cd "$W" && pwd -P)"
-trap 'rm -rf "$W"' EXIT
+trap 'for p in $(pgrep -f "$(basename "$W")" 2>/dev/null); do kill "$p" 2>/dev/null; done; rm -rf "$W"' EXIT
 pass=0; fail=0
 ok()  { pass=$((pass + 1)); echo "ok   $*"; }
 bad() { fail=$((fail + 1)); echo "FAIL $*"; }
